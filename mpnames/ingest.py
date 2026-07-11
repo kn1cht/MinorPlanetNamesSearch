@@ -643,6 +643,6 @@ def _read_text_url(url: str) -> str:
 
 
 def _read_bytes_url(url: str) -> bytes:
-    request = urllib.request.Request(url, headers={"User-Agent": "MPNamesSearch/0.1"})
+    request = urllib.request.Request(url, headers={"User-Agent": "Minor Planet Names Search/0.1"})
     with urllib.request.urlopen(request, timeout=60) as response:
         return response.read()

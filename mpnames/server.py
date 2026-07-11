@@ -138,13 +138,13 @@ def serve(db_path: Path, web_dir: Path, host: str = "127.0.0.1", port: int = 876
     db.initialize(connection)
     connection.close()
     server = AppServer((host, port), Handler, db_path, web_dir)
-    print(f"Serving MPNames Search at http://{host}:{port}/")
+    print(f"Serving Minor Planet Names Search at http://{host}:{port}/")
     server.serve_forever()
     return server
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Serve MPNames Search")
+    parser = argparse.ArgumentParser(description="Serve Minor Planet Names Search")
     parser.add_argument("--db", default=str(db.DEFAULT_DB), help="SQLite database path")
     parser.add_argument("--web", default="web", help="Static web directory")
     parser.add_argument("--host", default="127.0.0.1", help="Host to bind")

@@ -1,4 +1,4 @@
-# MPNames Search
+# Minor Planet Names Search
 
 Named minor planet search and analysis tool using MPC public data.
 
