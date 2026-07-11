@@ -1,0 +1,123 @@
+# MPNames Search
+
+Named minor planet search and analysis tool using MPC public data.
+
+## Quick Start
+
+This project intentionally uses only the Python standard library.
+
+```powershell
+uv run python -m mpnames init-sample
+uv run python -m mpnames serve
+```
+
+Open http://127.0.0.1:8765/ after the server starts.
+
+If `uv` is unavailable, use any Python 3.11+:
+
+```powershell
+python -m mpnames init-sample
+python -m mpnames serve
+```
+
+## Real Data Ingestion
+
+Start with a small, polite run:
+
+```powershell
+python -m mpnames ingest --mode add --limit 100 --classifier rules
+```
+
+`--limit` is applied after the ingest mode chooses which objects need to be
+fetched. It limits Identifier API requests, not the final database size.
+
+Ingest modes:
+
+- `add` default: fetch only named objects that are not already in the DB.
+- `update`: fetch existing objects too, but skip DB writes when nothing changed.
+- `reset`: clear the local DB, then fetch up to `--limit` objects.
+- `repair`: fetch objects missing from the DB, plus existing records with missing identifier fields.
+
+Discovery date, observatory/site, and discoverer information is read from
+MPC `NumberedMPs.txt` and cached locally at `data/NumberedMPs.txt`. To fill
+these fields for an existing database without re-requesting Identifier or Orbit
+API records, run:
+
+```powershell
+python -m mpnames enrich-discovery
+```
+
+Use `--refresh-cache` only when you want to download `NumberedMPs.txt` again.
+
+For a full local add run, omit `--limit`. Identifier API requests are batched at
+100 names per request or less. By default the importer waits briefly between
+Identifier API requests and pauses for 5 seconds after every 10 requests.
+
+```powershell
+python -m mpnames ingest --mode add --classifier rules
+```
+
+Rate-limit defaults are centralized in `mpnames/settings.py`:
+
+- `IDENTIFIER_BATCH_SIZE`
+- `IDENTIFIER_INTER_REQUEST_DELAY_SECONDS`
+- `IDENTIFIER_LONG_PAUSE_EVERY_REQUESTS`
+- `IDENTIFIER_LONG_PAUSE_SECONDS`
+- `ORBIT_INTER_REQUEST_DELAY_SECONDS`
+- `ORBIT_LONG_PAUSE_EVERY_REQUESTS`
+- `ORBIT_LONG_PAUSE_SECONDS`
+
+You can also override them from the CLI:
+
+```powershell
+python -m mpnames ingest --mode add --limit 1000 --batch-size 100 --pause-every 10 --pause-seconds 5 --orbit-pause-every 10 --orbit-pause-seconds 5
+```
+
+Long-running commands print progress by default, including MPC list fetches,
+Identifier API batch numbers, Orbits API request numbers, long rate-limit pauses, and
+classification/write progress. Add `--quiet` to suppress progress output:
+
+```powershell
+python -m mpnames ingest --mode add --limit 1000 --classifier rules --quiet
+```
+
+Citation categories can be assigned with one of three classifiers:
+
+- `rules`: fast keyword rules only.
+- `auto`: use ollama when its HTTP API is available; otherwise fall back to rules.
+- `ollama`: use ollama as the primary classifier, with rule fallback if the call fails or returns invalid labels.
+
+To reclassify an existing database without downloading MPC data again:
+
+```powershell
+python -m mpnames reclassify --classifier ollama
+```
+
+You can pin a specific local model:
+
+```powershell
+python -m mpnames reclassify --classifier ollama --ollama-model llama3.1
+```
+
+MPC sources used:
+
+- https://www.minorplanetcenter.net/iau/lists/MPNames.html
+- https://www.minorplanetcenter.net/iau/lists/NumberedMPs.txt
+- https://data.minorplanetcenter.net/api/query-identifier
+- https://data.minorplanetcenter.net/api/get-orb
+
+## Commands
+
+```powershell
+python -m mpnames init-sample
+python -m mpnames ingest --mode add --limit 100 --classifier rules
+python -m mpnames enrich-discovery
+python -m mpnames serve --host 127.0.0.1 --port 8765
+python -m mpnames ollama-status
+python -m unittest discover -s tests
+```
+
+Run `python -m mpnames reclassify --classifier ollama` only when local LLM
+capacity is available.
+
+Data is stored in `data/mpnames.sqlite3` by default.

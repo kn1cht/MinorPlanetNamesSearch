@@ -1,0 +1,13 @@
+[project]
+name = "mpnames-search"
+version = "0.1.0"
+description = "Local search and analysis UI for named minor planets"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.scripts]
+mpnames = "mpnames.__main__:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+

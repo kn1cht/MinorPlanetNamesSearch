@@ -1,0 +1,87 @@
+{
+  "A Coruna": {
+    "citation": "(9605) A Coruna = 1992 AT1<br><br>A Coruña is a port city in Galicia, Spain, located on the Atlantic coast.",
+    "found": 1,
+    "iau_designation": "(9605)",
+    "name": "A Coruna",
+    "object_type": ["Minor Planet", 0],
+    "orbfit_name": "9605",
+    "packed_permid": "09605",
+    "packed_primary_provisional_designation": "J92A01T",
+    "permid": "9605",
+    "unpacked_primary_provisional_designation": "1992 AT1"
+  },
+  "Aachen": {
+    "citation": "(274835) Aachen = 2009 QC11<br><br>Aachen is a German city, which developed from a Roman settlement and spa. It was the preferred medieval Imperial residence of Charlemagne.",
+    "found": 1,
+    "iau_designation": "(274835)",
+    "name": "Aachen",
+    "object_type": ["Minor Planet", 0],
+    "orbfit_name": "274835",
+    "packed_permid": "R4835",
+    "packed_primary_provisional_designation": "K09Q11C",
+    "permid": "274835",
+    "unpacked_primary_provisional_designation": "2009 QC11"
+  },
+  "Ceres": {
+    "citation": null,
+    "found": 1,
+    "iau_designation": "(1)",
+    "name": "Ceres",
+    "object_type": ["Minor Planet", 0],
+    "orbfit_name": "1",
+    "packed_permid": "00001",
+    "packed_primary_provisional_designation": "I01A00A",
+    "permid": "1",
+    "unpacked_primary_provisional_designation": "A801 AA"
+  },
+  "Borisov": {
+    "citation": "(11016) Borisov = 1982 SG12<br><br>Vladimir Aleksandrovich Borisov, regional ethnographer and a member of Russian Geography Society, was the author of a book about Shuya.",
+    "found": 1,
+    "iau_designation": "(11016)",
+    "name": "Borisov",
+    "object_type": ["Minor Planet", 0],
+    "orbfit_name": "11016",
+    "packed_permid": "11016",
+    "packed_primary_provisional_designation": "J82S12G",
+    "permid": "11016",
+    "unpacked_primary_provisional_designation": "1982 SG12"
+  },
+  "Apollo": {
+    "citation": "(1862) Apollo = 1932 HA<br><br>Apollo is a god in Greek and Roman mythology.",
+    "found": 1,
+    "iau_designation": "(1862)",
+    "name": "Apollo",
+    "object_type": ["Minor Planet", 0],
+    "orbfit_name": "1862",
+    "packed_permid": "01862",
+    "packed_primary_provisional_designation": "I32H00A",
+    "permid": "1862",
+    "unpacked_primary_provisional_designation": "1932 HA"
+  },
+  "Aten": {
+    "citation": "(2062) Aten = 1976 AA<br><br>Aten was named for an Egyptian god represented by the solar disk.",
+    "found": 1,
+    "iau_designation": "(2062)",
+    "name": "Aten",
+    "object_type": ["Minor Planet", 0],
+    "orbfit_name": "2062",
+    "packed_permid": "02062",
+    "packed_primary_provisional_designation": "I76A00A",
+    "permid": "2062",
+    "unpacked_primary_provisional_designation": "1976 AA"
+  },
+  "Alinda": {
+    "citation": "(887) Alinda = 1918 DB<br><br>Alinda is associated with mythology and ancient stories.",
+    "found": 1,
+    "iau_designation": "(887)",
+    "name": "Alinda",
+    "object_type": ["Minor Planet", 0],
+    "orbfit_name": "887",
+    "packed_permid": "00887",
+    "packed_primary_provisional_designation": "I18D00B",
+    "permid": "887",
+    "unpacked_primary_provisional_designation": "1918 DB"
+  }
+}
+
