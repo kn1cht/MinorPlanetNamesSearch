@@ -27,39 +27,45 @@
     <div class="searchbar-row">
       <label class="search-input-wrap" for="query">
         <svg class="search-icon" viewBox="0 0 20 20" fill="none"><circle cx="8.5" cy="8.5" r="5.5" stroke="currentColor" stroke-width="1.8"/><line x1="13" y1="13" x2="18" y2="18" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
-        <input id="query" type="search" placeholder="検索キーワードを入力 例: Broca, Apollo, !mythology">
+        <input id="query" type="search" placeholder="検索">
         <kbd id="clearQuery" class="clear-kbd" title="クリア" hidden>✕</kbd>
       </label>
-      <select id="queryMode" class="query-mode-select" aria-label="検索キーワードの結合条件">
-        <option value="and" selected>AND</option>
-        <option value="or">OR</option>
-      </select>
-      <select id="queryTarget" class="query-mode-select" aria-label="検索対象">
-        <option value="both" selected>名前+Citation</option>
-        <option value="name">名前のみ</option>
-        <option value="citation">Citationのみ</option>
-      </select>
-      <button id="filterMenuBtn" class="filter-menu-btn" type="button">
-        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M3 5h14M6 10h8M9 15h2"/></svg>
-        絞り込み
-        <span id="filterBadgeCount" class="filter-badge" hidden></span>
-      </button>
-      <button id="clearAllFiltersBtn" class="secondary inline-reset-btn" type="button" hidden>条件クリア</button>
-      <div class="sort-controls">
-        <select id="sortField" aria-label="並び替え項目">
-          <option value="alpha" selected>名前順</option>
-          <option value="number">番号順</option>
-          <option value="absolute_magnitude">等級順</option>
-          <option value="semimajor_axis">軌道長半径順</option>
-          <option value="eccentricity">離心率順</option>
-          <option value="inclination">傾斜角順</option>
+      <div class="search-scroll-container" id="searchScrollContainer">
+        <div class="search-controls-row" id="searchControlsRow">
+        <select id="queryMode" class="query-mode-select" aria-label="検索キーワードの結合条件">
+          <option value="and" selected>AND</option>
+          <option value="or">OR</option>
         </select>
-        <select id="sortDirection" aria-label="並び順">
-          <option value="asc" selected>↑ 昇順</option>
-          <option value="desc">↓ 降順</option>
+        <select id="queryTarget" class="query-mode-select" aria-label="検索対象">
+          <option value="both" selected>名前+Citation</option>
+          <option value="name">名前のみ</option>
+          <option value="citation">Citationのみ</option>
         </select>
-      </div>
-    </div>
+        <button id="filterMenuBtn" class="filter-menu-btn" type="button">
+          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7">
+            <path d="M3 5h14M6 10h8M9 15h2" />
+          </svg>
+          絞り込み
+          <span id="filterBadgeCount" class="filter-badge" hidden></span>
+        </button>
+        <button id="clearAllFiltersBtn" class="secondary inline-reset-btn" type="button" hidden>条件クリア</button>
+        <div class="sort-controls">
+          <select id="sortField" aria-label="並び替え項目">
+            <option value="alpha" selected>名前順</option>
+            <option value="number">番号順</option>
+            <option value="absolute_magnitude">等級順</option>
+            <option value="semimajor_axis">軌道長半径順</option>
+            <option value="eccentricity">離心率順</option>
+            <option value="inclination">傾斜角順</option>
+          </select>
+          <select id="sortDirection" aria-label="並び順">
+            <option value="asc" selected>↑ 昇順</option>
+            <option value="desc">↓ 降順</option>
+          </select>
+        </div><!-- /.sort-controls -->
+        </div><!-- /.search-controls-row -->
+      </div><!-- /.search-scroll-container -->
+    </div><!-- /.searchbar-row -->
 
     <div id="activeFilterTags" class="active-filter-tags" aria-label="Active filters"></div>
     <p id="queryHelp" class="query-help">Enterで複数キーワードを追加、!キーワードで除外検索できます。</p>
@@ -89,12 +95,22 @@
     </section>
 
     <!-- Right: detail + wordcloud (30%) -->
-    <aside class="side-panel">
-      <div class="side-panel-detail">
+    <aside id="sidePanel" class="side-panel">
+      <!-- Mobile: タブバー + 閉じるボタン -->
+      <div class="side-panel-mobile-header">
+        <div class="side-tabs" role="tablist">
+          <button class="side-tab active" id="tabDetail" role="tab" aria-selected="true"
+            aria-controls="sideTabDetail">詳細</button>
+          <button class="side-tab" id="tabWordcloud" role="tab" aria-selected="false"
+            aria-controls="sideTabWordcloud">キーワード頻度</button>
+        </div>
+        <button id="closeSidePanel" class="close-side-panel" type="button" aria-label="閉じる">✕</button>
+      </div>
+      <div class="side-panel-detail" id="sideTabDetail" role="tabpanel">
         <div class="panel-title">詳細</div>
         <div id="detailBody" class="detail-body">リストから天体を選択してください。</div>
       </div>
-      <div class="side-panel-wordcloud">
+      <div class="side-panel-wordcloud" id="sideTabWordcloud" role="tabpanel">
         <div class="panel-title">
           キーワード頻度
           <span id="wordCount" class="word-count-badge">—</span>
@@ -103,6 +119,9 @@
       </div>
     </aside>
   </div>
+
+  <!-- モバイル用詳細パネル背景オーバーレイ -->
+  <div id="mobileDetailOverlay" class="mobile-detail-overlay" hidden></div>
 
   <!-- ========== FILTER MODAL ========== -->
   <div id="filterModal" class="modal-overlay" aria-modal="true" role="dialog" hidden>

@@ -1,5 +1,5 @@
 /* ============================================================
-   MPNames – app.js
+   Minor Planet Names – app.js
    ============================================================ */
 
 const state = {
@@ -69,6 +69,15 @@ const els = {
   wordCloud:           qs("#wordCloud"),
   wordCount:           qs("#wordCount"),
   detailBody:          qs("#detailBody"),
+  sidePanel:           qs("#sidePanel"),
+  closeSidePanel:      qs("#closeSidePanel"),
+  tabDetail:           qs("#tabDetail"),
+  tabWordcloud:        qs("#tabWordcloud"),
+  sideTabDetail:       qs("#sideTabDetail"),
+  sideTabWordcloud:    qs("#sideTabWordcloud"),
+  mobileDetailOverlay: qs("#mobileDetailOverlay"),
+  searchScrollContainer: qs("#searchScrollContainer"),
+  searchControlsRow:   qs("#searchControlsRow"),
 };
 
 let searchTimer = null;
@@ -80,6 +89,8 @@ const QUERY_HELP = "Enterで複数キーワードを追加、!を先頭につけ
    ============================================================ */
 async function init() {
   bindEvents();
+  initMobileTabs();
+  updateSearchScrollShadows();
   updateQueryHelp();
   await loadStats();
   await refresh();
@@ -196,6 +207,39 @@ function bindEvents() {
   // Reset
   els.resetFilters.addEventListener("click", resetAllConditions);
   els.clearAllFiltersBtn.addEventListener("click", resetAllConditions);
+
+  // Mobile side panel: close button & overlay = minimize
+  els.closeSidePanel.addEventListener("click", (e) => {
+    e.stopPropagation(); // ヘッダータップへのバブル伝播を防ぐ
+    closeMobileDetail();
+  });
+  els.mobileDetailOverlay.addEventListener("click", closeMobileDetail);
+
+  // Mobile tabs: タブクリックで展開 + タブ切り替え
+  els.tabDetail.addEventListener("click", (e) => {
+    e.stopPropagation();
+    switchMobileTab("detail");
+    if (isMobile()) openMobileDetail();
+  });
+  els.tabWordcloud.addEventListener("click", (e) => {
+    e.stopPropagation();
+    switchMobileTab("wordcloud");
+    if (isMobile()) openMobileDetail();
+  });
+
+  // ヘッダーバー全体をタップで展開（閉じるボタンおよびタブボタンを除く）
+  els.sidePanel.querySelector(".side-panel-mobile-header").addEventListener("click", () => {
+    if (isMobile() && !els.sidePanel.classList.contains("is-open")) openMobileDetail();
+  });
+
+  // Escape closes mobile panel too
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && els.sidePanel.classList.contains("is-open")) closeMobileDetail();
+  });
+
+  // Search row scroll shadows
+  els.searchControlsRow.addEventListener("scroll", updateSearchScrollShadows);
+  window.addEventListener("resize", updateSearchScrollShadows);
 }
 
 function resetAllConditions() {
@@ -239,7 +283,10 @@ function openModal() {
 }
 function closeModal() {
   els.filterModal.hidden = true;
-  document.body.style.overflow = "";
+  // モバイルでは body overflow は変更しない（ページスクロールは常時許可）
+  if (window.innerWidth > 740) {
+    document.body.style.overflow = "";
+  }
 }
 
 /* ============================================================
@@ -335,7 +382,7 @@ function currentParams() {
    RENDER: RESULTS
    ============================================================ */
 function renderResults(items) {
-  els.resultSummary.textContent = `${formatNumber(state.total)} objects matched`;
+  els.resultSummary.textContent = `${formatNumber(state.total)}`;
 
   if (!items.length) {
     els.results.innerHTML = `<div class="empty">条件に一致する天体がありません。</div>`;
@@ -612,6 +659,12 @@ async function loadDetail(permid) {
   `;
   // 詳細パネルのスクロールをトップに戻す
   els.detailBody.scrollTop = 0;
+
+  // モバイル: 詳細タブにフォーカスしてパネルを開く
+  if (isMobile()) {
+    switchMobileTab("detail");
+    openMobileDetail();
+  }
 }
 
 function renderDetailBadge(category) {
@@ -759,6 +812,74 @@ function renderSnippet(v) {
   return escaped
     .replaceAll("\x00", '<mark class="hl">')
     .replaceAll("\x01", "</mark>");
+}
+
+/* ============================================================
+   MOBILE DETAIL PANEL
+   ============================================================ */
+
+/** 初期タブ状態を設定（常にdetailタブから始める） */
+function initMobileTabs() {
+  switchMobileTab("detail");
+}
+
+/** 現在モバイルレイアウトか判定 */
+function isMobile() {
+  return window.matchMedia("(max-width: 740px)").matches;
+}
+
+/** モバイル用詳細パネルを開く */
+function openMobileDetail() {
+  els.sidePanel.classList.add("is-open");
+  els.mobileDetailOverlay.hidden = false;
+  document.body.style.overflow = "hidden";
+}
+
+/** モバイル用詳細パネルを最小化（タブバーのみ表示）に戻す */
+function closeMobileDetail() {
+  els.sidePanel.classList.remove("is-open");
+  els.mobileDetailOverlay.hidden = true;
+  document.body.style.overflow = "";
+  // is-openを外すだけで transform: translateY(calc(100% - 44px)) に戻る
+}
+
+/**
+ * モバイルタブを切り替える
+ * @param {"detail"|"wordcloud"} tab
+ */
+function switchMobileTab(tab) {
+  const isDetail = tab === "detail";
+  // タブボタンのアクティブ状態
+  els.tabDetail.classList.toggle("active", isDetail);
+  els.tabWordcloud.classList.toggle("active", !isDetail);
+  els.tabDetail.setAttribute("aria-selected", isDetail ? "true" : "false");
+  els.tabWordcloud.setAttribute("aria-selected", isDetail ? "false" : "true");
+  // パネルの表示切り替え
+  els.sideTabDetail.classList.toggle("tab-active", isDetail);
+  els.sideTabWordcloud.classList.toggle("tab-active", !isDetail);
+}
+
+/** 検索コントロールの横スクロールシャドウを更新 */
+function updateSearchScrollShadows() {
+  const row = els.searchControlsRow;
+  if (!row) return;
+  // 横スクロールの余地があるか
+  const hasScroll = row.scrollWidth > row.clientWidth;
+  
+  if (!hasScroll) {
+    els.searchScrollContainer.classList.remove("can-scroll-left", "can-scroll-right");
+    return;
+  }
+  
+  const scrollLeft = row.scrollLeft;
+  const maxScroll = row.scrollWidth - row.clientWidth;
+  
+  // 1px程度の誤差を許容
+  const canScrollLeft = scrollLeft > 1;
+  const canScrollRight = scrollLeft < maxScroll - 1;
+  
+  els.searchScrollContainer.classList.toggle("can-scroll-left", canScrollLeft);
+  els.searchScrollContainer.classList.toggle("can-scroll-right", canScrollRight);
 }
 
 /* ============================================================

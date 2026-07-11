@@ -163,6 +163,16 @@ h1 {
   align-items: center;
   gap: 8px;
 }
+.search-controls-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: nowrap;
+}
+/* スクロールシャドウ用ラッパー (desktop: 無効) */
+.search-scroll-container {
+  position: relative;
+}
 
 /* Search input */
 .search-input-wrap {
@@ -932,4 +942,226 @@ mark.hl {
 }
 .site-footer a:hover {
   color: var(--ink);
+}
+
+/* ===== SIDE PANEL MOBILE HEADER (desktop: hidden) ===== */
+.side-panel-mobile-header {
+  display: none;
+  flex: none;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 12px;
+  height: 44px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel-raised);
+  gap: 8px;
+}
+.side-tabs {
+  display: flex;
+  gap: 4px;
+}
+.side-tab {
+  height: 32px;
+  padding: 0 14px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.side-tab.active {
+  background: var(--accent-dim);
+  border-color: var(--accent-focus-border);
+  color: var(--accent-strong);
+}
+.close-side-panel {
+  width: 32px; height: 32px;
+  flex: none;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 14px;
+  cursor: pointer;
+  min-height: 0;
+}
+.close-side-panel:hover { background: var(--panel); color: var(--ink); }
+
+/* Mobile overlay behind bottom sheet */
+.mobile-detail-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.5);
+  z-index: 199;
+  backdrop-filter: blur(2px);
+}
+
+/* ===== RESPONSIVE: <= 740px ===== */
+@media (max-width: 740px) {
+
+  /* ---------- Header: Updated & Named Objects 非表示 ---------- */
+  .dataset-meta,
+  .topbar-right {
+    display: none;
+  }
+
+  /* ---------- Search bar: 2段レイアウト ---------- */
+  .searchbar-row {
+    flex-wrap: wrap;
+    row-gap: 6px;
+  }
+  /* 1段目: 検索ボックス全幅 */
+    .search-input-wrap {
+    flex: 1 1 100%;
+  }
+    /* 2段目: ラッパーが横スクロールコンテキスト */
+    .search-scroll-container {
+      flex: 1 1 100%;
+      position: relative;
+      overflow: hidden;
+      /* シャドウのはみ出しをクリップ */
+    }
+  
+    .search-scroll-container::before,
+    .search-scroll-container::after {
+      content: "";
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      width: 18px;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 0.2s;
+      z-index: 10;
+    }
+  
+    .search-scroll-container::before {
+      left: 0;
+      background: linear-gradient(to right, rgba(255, 255, 255, 0.12), transparent);
+    }
+  
+    .search-scroll-container::after {
+      right: 0;
+      background: linear-gradient(to left, rgba(255, 255, 255, 0.12), transparent);
+    }
+  
+    .search-scroll-container.can-scroll-left::before {
+      opacity: 1;
+    }
+  
+    .search-scroll-container.can-scroll-right::after {
+      opacity: 1;
+    }
+  
+    /* 2段目: コントロールを横スクロール1行に */
+    .search-controls-row {
+    overflow-x: auto;
+      scrollbar-width: none;
+      flex-wrap: nowrap;
+      padding-bottom: 2px;
+  }
+    .search-controls-row::-webkit-scrollbar {
+      display: none;
+    }
+
+  /* ---------- body: スクロール許可（モバイルでは高さ固定解除） ---------- */
+  html, body {
+    overflow: auto;
+    height: auto;
+  }
+  body {
+    min-height: 100dvh;
+    /* 常時表示のミニタブバー分のパディング */
+      padding-bottom: 44px;
+  }
+
+    /* ---------- メインコンテンツ: 縦１列 ---------- */
+  .main-content {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto;
+    overflow: visible;
+    height: auto;
+    min-height: 60vh;
+  }
+
+  /* 検索結果は全幅 */
+  .results-panel {
+    border-right: none;
+    overflow: visible;
+    min-height: 60vh;
+  }
+  .result-list {
+    overflow: visible;
+  }
+
+    /* ---------- サイドパネル: 常時表示ミニタブ + ボトムシート ---------- */
+  .side-panel {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 72vh;
+    max-height: 72vh;
+    z-index: 200;
+    border-radius: 16px 16px 0 0;
+    border-top: 1px solid var(--line-strong);
+    box-shadow: 0 -8px 32px rgba(0, 0, 0, 0.5);
+      /* デフォルト: タブバー分のみ表示 */
+      transform: translateY(calc(100% - 44px));
+    transition: transform 0.3s cubic-bezier(0.32, 0.72, 0, 1);
+    will-change: transform;
+    overflow: hidden;
+  }
+  .side-panel.is-open {
+    transform: translateY(0);
+  }
+
+  /* モバイルヘッダー表示 */
+  .side-panel-mobile-header {
+    display: flex;
+    cursor: pointer;
+      /* タップで展開できることを示唆 */
+  }
+
+  /* デスクトップ用タイトルを非表示（タブで代替） */
+  .side-panel-detail > .panel-title,
+  .side-panel-wordcloud > .panel-title {
+    display: none;
+  }
+
+  /* タブパネルの表示/非表示 */
+  .side-panel-detail,
+  .side-panel-wordcloud {
+    display: none;
+    flex: 1;
+    min-height: 0;
+  }
+  .side-panel-detail.tab-active,
+  .side-panel-wordcloud.tab-active {
+    display: flex;
+    flex-direction: column;
+  }
+  /* キーワード頻度パネルは固定高を解除 */
+  .side-panel-wordcloud.tab-active {
+    height: auto;
+  }
+
+  /* ---------- フィルターモーダル: 1カラム ---------- */
+  .modal-overlay {
+    padding-top: calc(var(--header-h) + 8px);
+    align-items: flex-start;
+  }
+  .modal-panel {
+    max-height: calc(100dvh - var(--header-h) - 16px);
+    border-radius: 10px;
+  }
+  .modal-body {
+    grid-template-columns: 1fr;
+  }
+  .filter-section:nth-child(3n) { border-right: 1px solid var(--line); }
+  .filter-section:last-child { border-right: none; }
 }
