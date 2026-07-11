@@ -11,7 +11,7 @@ const state = {
   discoverers: [],
   observatories: [],
   flags: [],
-  sort: "number",
+  sort: "alpha",
   direction: "asc",
   limit: 30,
   offset: 0,
@@ -208,7 +208,7 @@ function resetAllConditions() {
   state.discoverers = [];
   state.observatories = [];
   state.flags = [];
-  state.sort = "number";
+  state.sort = "alpha";
   state.direction = "asc";
   state.offset = 0;
   els.query.value = "";
