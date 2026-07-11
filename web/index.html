@@ -11,12 +11,16 @@
   <header class="topbar">
     <div class="topbar-left">
       <span class="app-logo">✦</span>
-      <h1>Minor Planet Names</h1>
-      <span id="datasetMeta" class="dataset-meta">Loading…</span>
+      <h1 data-i18n="header.title">Minor Planet Names</h1>
+      <span id="datasetMeta" class="dataset-meta" data-i18n="header.dataset_meta_loading">Loading…</span>
     </div>
     <div class="topbar-right">
+      <select id="langSwitch" class="lang-switch" aria-label="Language">
+        <option value="ja">日本語</option>
+        <option value="en">English</option>
+      </select>
       <div class="metric-chip">
-        <span class="metric-label">Named Objects</span>
+        <span class="metric-label" data-i18n="header.named_objects">Named Objects</span>
         <strong id="totalObjects">—</strong>
       </div>
     </div>
@@ -27,40 +31,40 @@
     <div class="searchbar-row">
       <label class="search-input-wrap" for="query">
         <svg class="search-icon" viewBox="0 0 20 20" fill="none"><circle cx="8.5" cy="8.5" r="5.5" stroke="currentColor" stroke-width="1.8"/><line x1="13" y1="13" x2="18" y2="18" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
-        <input id="query" type="search" placeholder="検索">
+        <input id="query" type="search" placeholder="検索" data-i18n="search.placeholder">
         <kbd id="clearQuery" class="clear-kbd" title="クリア" hidden>✕</kbd>
       </label>
       <div class="search-scroll-container" id="searchScrollContainer">
         <div class="search-controls-row" id="searchControlsRow">
         <select id="queryMode" class="query-mode-select" aria-label="検索キーワードの結合条件">
-          <option value="and" selected>AND</option>
-          <option value="or">OR</option>
+          <option value="and" selected data-i18n="search.mode_and">AND</option>
+          <option value="or" data-i18n="search.mode_or">OR</option>
         </select>
         <select id="queryTarget" class="query-mode-select" aria-label="検索対象">
-          <option value="both" selected>名前+Citation</option>
-          <option value="name">名前のみ</option>
-          <option value="citation">Citationのみ</option>
+          <option value="both" selected data-i18n="search.target_both">名前+Citation</option>
+          <option value="name" data-i18n="search.target_name">名前のみ</option>
+          <option value="citation" data-i18n="search.target_citation">Citationのみ</option>
         </select>
         <button id="filterMenuBtn" class="filter-menu-btn" type="button">
           <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7">
             <path d="M3 5h14M6 10h8M9 15h2" />
           </svg>
-          絞り込み
+          <span data-i18n="search.filter_btn">絞り込み</span>
           <span id="filterBadgeCount" class="filter-badge" hidden></span>
         </button>
-        <button id="clearAllFiltersBtn" class="secondary inline-reset-btn" type="button" hidden>条件クリア</button>
+        <button id="clearAllFiltersBtn" class="secondary inline-reset-btn" type="button" hidden data-i18n="search.clear_all">条件クリア</button>
         <div class="sort-controls">
           <select id="sortField" aria-label="並び替え項目">
-            <option value="alpha" selected>名前順</option>
-            <option value="number">番号順</option>
-            <option value="absolute_magnitude">等級順</option>
-            <option value="semimajor_axis">軌道長半径順</option>
-            <option value="eccentricity">離心率順</option>
-            <option value="inclination">傾斜角順</option>
+            <option value="alpha" selected data-i18n="sort.alpha">名前順</option>
+            <option value="number" data-i18n="sort.number">番号順</option>
+            <option value="absolute_magnitude" data-i18n="sort.absolute_magnitude">等級順</option>
+            <option value="semimajor_axis" data-i18n="sort.semimajor_axis">軌道長半径順</option>
+            <option value="eccentricity" data-i18n="sort.eccentricity">離心率順</option>
+            <option value="inclination" data-i18n="sort.inclination">傾斜角順</option>
           </select>
           <select id="sortDirection" aria-label="並び順">
-            <option value="asc" selected>↑ 昇順</option>
-            <option value="desc">↓ 降順</option>
+            <option value="asc" selected data-i18n="sort.asc">↑ 昇順</option>
+            <option value="desc" data-i18n="sort.desc">↓ 降順</option>
           </select>
         </div><!-- /.sort-controls -->
         </div><!-- /.search-controls-row -->
@@ -68,7 +72,7 @@
     </div><!-- /.searchbar-row -->
 
     <div id="activeFilterTags" class="active-filter-tags" aria-label="Active filters"></div>
-    <p id="queryHelp" class="query-help">Enterで複数キーワードを追加、!キーワードで除外検索できます。</p>
+    <p id="queryHelp" class="query-help" data-i18n="search.help">Enterで複数キーワードを追加、!キーワードで除外検索できます。</p>
   </div>
 
   <!-- ========== MAIN CONTENT ========== -->
@@ -100,19 +104,19 @@
       <div class="side-panel-mobile-header">
         <div class="side-tabs" role="tablist">
           <button class="side-tab active" id="tabDetail" role="tab" aria-selected="true"
-            aria-controls="sideTabDetail">詳細</button>
+            aria-controls="sideTabDetail" data-i18n="side.tab_detail">詳細</button>
           <button class="side-tab" id="tabWordcloud" role="tab" aria-selected="false"
-            aria-controls="sideTabWordcloud">キーワード頻度</button>
+            aria-controls="sideTabWordcloud" data-i18n="side.tab_wordcloud">キーワード頻度</button>
         </div>
         <button id="closeSidePanel" class="close-side-panel" type="button" aria-label="閉じる">✕</button>
       </div>
       <div class="side-panel-detail" id="sideTabDetail" role="tabpanel">
-        <div class="panel-title">詳細</div>
-        <div id="detailBody" class="detail-body">リストから天体を選択してください。</div>
+        <div class="panel-title" data-i18n="side.detail_title">詳細</div>
+        <div id="detailBody" class="detail-body" data-i18n="side.detail_empty">リストから天体を選択してください。</div>
       </div>
       <div class="side-panel-wordcloud" id="sideTabWordcloud" role="tabpanel">
         <div class="panel-title">
-          キーワード頻度
+          <span data-i18n="side.wordcloud_title">キーワード頻度</span>
           <span id="wordCount" class="word-count-badge">—</span>
         </div>
         <div id="wordCloud" class="word-cloud" aria-label="Keyword frequency"></div>
@@ -127,38 +131,40 @@
   <div id="filterModal" class="modal-overlay" aria-modal="true" role="dialog" hidden>
     <div class="modal-panel">
       <div class="modal-header">
-        <h2>絞り込み条件</h2>
+        <h2 data-i18n="modal.title">絞り込み条件</h2>
         <button id="filterModalClose" class="modal-close" type="button" aria-label="閉じる">✕</button>
       </div>
       <div class="modal-body">
         <div class="filter-section">
-          <div class="filter-section-title">軌道分類</div>
+          <div class="filter-section-title" data-i18n="modal.orbit">軌道分類</div>
           <div id="orbitFilters" class="check-list" aria-label="軌道フィルタ"></div>
         </div>
         <div class="filter-section">
-          <div class="filter-section-title">命名カテゴリ</div>
+          <div class="filter-section-title" data-i18n="modal.citation">命名カテゴリ</div>
           <div id="citationFilters" class="check-list" aria-label="命名カテゴリフィルタ"></div>
         </div>
         <div class="filter-section">
-          <div class="filter-section-title">発見者</div>
+          <div class="filter-section-title" data-i18n="modal.discoverer">発見者</div>
           <div id="discovererFilters" class="check-list" aria-label="発見者フィルタ"></div>
         </div>
         <div class="filter-section">
-          <div class="filter-section-title">観測所</div>
+          <div class="filter-section-title" data-i18n="modal.observatory">観測所</div>
           <div id="observatoryFilters" class="check-list" aria-label="観測所フィルタ"></div>
         </div>
         <div class="filter-section">
-          <div class="filter-section-title">フラグ</div>
+          <div class="filter-section-title" data-i18n="modal.flag">フラグ</div>
           <div id="flagFilters" class="check-list compact" aria-label="フラグフィルタ"></div>
         </div>
       </div>
       <div class="modal-footer">
-        <button id="resetFilters" class="secondary" type="button">すべてリセット</button>
-        <button id="filterModalApply" class="primary" type="button">適用</button>
+        <button id="resetFilters" class="secondary" type="button" data-i18n="modal.reset">すべてリセット</button>
+        <button id="filterModalApply" class="primary" type="button" data-i18n="modal.apply">適用</button>
       </div>
     </div>
   </div>
 
+  <script src="https://unpkg.com/i18next@23.10.1/i18next.min.js"></script>
+  <script src="/i18n.js"></script>
   <script src="/app.js"></script>
 
   <!-- ========== FOOTER ========== -->

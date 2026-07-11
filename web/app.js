@@ -78,16 +78,18 @@ const els = {
   mobileDetailOverlay: qs("#mobileDetailOverlay"),
   searchScrollContainer: qs("#searchScrollContainer"),
   searchControlsRow:   qs("#searchControlsRow"),
+  langSwitch:          qs("#langSwitch"),
 };
 
 let searchTimer = null;
 const AUTO_SEARCH_DEBOUNCE_MS = 450;
-const QUERY_HELP = "Enterで複数キーワードを追加、!を先頭につけると除外検索できます。";
 
 /* ============================================================
    INIT
    ============================================================ */
 async function init() {
+  await initI18n();
+  els.langSwitch.value = i18next.language.startsWith('ja') ? 'ja' : 'en';
   bindEvents();
   initMobileTabs();
   updateSearchScrollShadows();
@@ -100,6 +102,15 @@ async function init() {
    EVENTS
    ============================================================ */
 function bindEvents() {
+  els.langSwitch.addEventListener("change", (e) => {
+    const lang = e.target.value;
+    i18next.changeLanguage(lang).then(() => {
+      updateTranslations();
+      renderActiveFilterTags();
+      refresh(); // 再描画が必要な要素（件数等）を更新するため
+    });
+  });
+
   // Search terms: Enter adds the current input as a committed keyword.
   els.query.addEventListener("input", () => {
     updateClearQueryVisibility();
@@ -295,9 +306,11 @@ function closeModal() {
 async function loadStats() {
   const stats = await getJson("/api/stats");
   els.totalObjects.textContent = formatNumber(stats.total);
-  els.datasetMeta.textContent = stats.latest_updated_at
-    ? `Updated ${stats.latest_updated_at.slice(0, 10)}`
-    : "No dataset loaded";
+  if (stats.latest_updated_at) {
+    els.datasetMeta.textContent = i18next.t("header.dataset_meta_updated", { date: stats.latest_updated_at.slice(0, 10) });
+  } else {
+    els.datasetMeta.textContent = i18next.t("header.dataset_meta_none");
+  }
   state.allOrbitFacets        = stats.orbit_types         || [];
   state.allCitationFacets     = stats.citation_categories || [];
   state.allDiscovererFacets   = stats.discoverers          || [];
@@ -382,12 +395,17 @@ function currentParams() {
    RENDER: RESULTS
    ============================================================ */
 function renderResults(items) {
-  els.resultSummary.textContent = `${formatNumber(state.total)}`;
-
-  if (!items.length) {
-    els.results.innerHTML = `<div class="empty">条件に一致する天体がありません。</div>`;
+  if (state.total === 0) {
+    els.results.innerHTML = `<div class="empty">${i18next.t("app.result_summary_zero")}</div>`;
+    els.resultSummary.textContent = i18next.t("app.result_summary_zero");
+    els.pageLabel.textContent = "1 / 1";
+    updatePagerButtons(1);
     return;
   }
+
+  const start = state.offset + 1;
+  const end = Math.min(state.offset + state.limit, state.total);
+  els.resultSummary.textContent = i18next.t("app.result_summary", { start: formatNumber(start), end: formatNumber(end), total: formatNumber(state.total) });
 
   els.results.innerHTML = "";
   items.forEach((item) => {
@@ -443,9 +461,9 @@ function renderActiveFilterTags() {
     const tag = document.createElement("span");
     tag.className = `filter-tag search-tag${isNegated ? " search-tag-not" : ""}`;
     tag.innerHTML = `
-      <span class="filter-tag-kind">検索(${modeLabel})</span>
+      <span class="filter-tag-kind">${i18next.t("app.filter_tag_search", { mode: modeLabel })}</span>
       ${escapeHtml(displayValue)}
-      <span class="filter-tag-remove" aria-label="解除">✕</span>
+      <span class="filter-tag-remove" aria-label="${i18next.t("app.remove")}">✕</span>
     `;
     tag.addEventListener("click", (e) => {
       if (!e.target.classList.contains("filter-tag-remove")) {
@@ -469,7 +487,7 @@ function renderActiveFilterTags() {
       tag.innerHTML = `
         <span class="filter-tag-kind">${escapeHtml(meta.label)}</span>
         ${escapeHtml(value)}
-        <span class="filter-tag-remove" aria-label="解除">✕</span>
+        <span class="filter-tag-remove" aria-label="${i18next.t("app.remove")}">✕</span>
       `;
       // Click body → open modal for editing
       tag.addEventListener("click", (e) => {
@@ -511,7 +529,7 @@ function renderFacets() {
 function renderCheckboxGroup(container, values, selected, stateKey) {
   container.innerHTML = "";
   if (!values.length) {
-    container.innerHTML = `<div class="empty">オプションなし</div>`;
+    container.innerHTML = `<div class="empty">${i18next.t("app.no_options")}</div>`;
     return;
   }
   values.forEach((item) => {
@@ -592,8 +610,8 @@ function scheduleAutoSearchIfNeeded() {
 }
 
 function updateQueryHelp() {
-  if (!els.queryHelp) return;
-  els.queryHelp.textContent = QUERY_HELP;
+  // queryHelpはindex.html側でdata-i18n属性で処理するためここでの更新は不要
+  els.queryHelp.hidden = state.queryTerms.length > 0;
 }
 
 /* ============================================================
@@ -887,5 +905,5 @@ function updateSearchScrollShadows() {
    ============================================================ */
 init().catch((err) => {
   console.error(err);
-  els.results.innerHTML = `<div class="empty">データの読み込みに失敗しました。</div>`;
+  els.results.innerHTML = `<div class="empty">${i18next && i18next.isInitialized ? i18next.t("app.error_loading") : "Failed to load data."}</div>`;
 });

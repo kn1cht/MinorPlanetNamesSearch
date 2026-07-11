@@ -127,6 +127,25 @@ h1 {
 .topbar-right {
   display: flex;
   gap: 10px;
+  align-items: center;
+}
+.lang-switch {
+  min-height: 32px;
+  padding: 0 28px 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background:
+      url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%23a8a8a2'/%3E%3C/svg%3E") no-repeat right 10px center,
+      var(--panel-raised);
+  color: var(--ink);
+  font-size: 12px;
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+}
+.lang-switch:focus {
+  outline: 2px solid var(--accent-focus-outline);
+  border-color: var(--accent-focus-border);
 }
 .metric-chip {
   display: flex;
@@ -1005,7 +1024,7 @@ mark.hl {
 
   /* ---------- Header: Updated & Named Objects 非表示 ---------- */
   .dataset-meta,
-  .topbar-right {
+  .metric-chip {
     display: none;
   }
 
