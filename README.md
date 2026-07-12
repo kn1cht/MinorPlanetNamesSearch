@@ -121,3 +121,46 @@ Run `python -m mpnames reclassify --classifier ollama` only when local LLM
 capacity is available.
 
 Data is stored in `data/mpnames.sqlite3` by default.
+
+## Web Deployment (Cloudflare Pages & D1)
+
+This project features a dual-architecture that allows the exact same frontend (`web/`) to be served by either the local Python server or Cloudflare Pages (via Cloudflare Workers and D1).
+
+### Architecture
+
+1. **Local Python Environment**: Optimized for data ingestion, processing, and fast local testing. Uses the local `data/mpnames.sqlite3` database.
+2. **Cloudflare Pages Environment**: Optimized for global, serverless web hosting. Uses TypeScript APIs (`functions/api/*.ts`) and Cloudflare D1 as the database.
+
+### Workflow
+
+1. **Ingest & Process Data Locally**:
+   Use the Python CLI to download, parse, and classify minor planets.
+   ```powershell
+   python -m mpnames ingest --mode add --classifier rules
+   ```
+
+2. **Test Locally (Python)**:
+   Launch the local Flask server to verify the UI and data using local SQLite.
+   ```powershell
+   python -m mpnames serve
+   ```
+   Open `http://localhost:5000` to preview.
+
+3. **Sync Database to Cloudflare D1**:
+   When you're ready to publish the updated database, push the local SQLite data to Cloudflare D1. This script automatically generates an optimized SQL dump (handling FTS5 virtual tables and dependencies) and uploads it to the `mpnames-db` remote database.
+   ```powershell
+   npm run push-db
+   ```
+   *(Note: This process may take a few minutes for a full database)*
+
+4. **Test Locally (Cloudflare Emulator)**:
+   To test the Cloudflare Pages environment locally using Wrangler's miniflare emulator and your local D1 configuration:
+   ```powershell
+   npm run dev
+   ```
+
+5. **Deploy to Cloudflare Pages (Production)**:
+   Build and deploy the frontend and serverless APIs to the live website (`mpnames.pages.dev`).
+   ```powershell
+   npm run deploy
+   ```

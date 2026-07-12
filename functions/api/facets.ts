@@ -18,74 +18,63 @@ async function buildFacets(
   where: string,
   filterParams: (string | number)[]
 ) {
-  // Orbit Types
-  const orbitRows = await db
-    .prepare(
+  const neoWhere = where ? `${where} AND mp.is_neo = 1` : "WHERE mp.is_neo = 1";
+  const phaWhere = where ? `${where} AND mp.is_pha = 1` : "WHERE mp.is_pha = 1";
+
+  // Execute all queries in a single round-trip to D1
+  const [
+    orbitRes,
+    citationRes,
+    discovererRes,
+    observatoryRes,
+    neoRes,
+    phaRes,
+  ] = await db.batch([
+    db.prepare(
       `SELECT COALESCE(mp.orbit_type, 'Unclassified') AS value, COUNT(DISTINCT mp.permid) AS count
        FROM minor_planets mp ${joins} ${where}
        GROUP BY 1 ORDER BY count DESC, 1`
-    )
-    .bind(...filterParams)
-    .all<{ value: string; count: number }>();
+    ).bind(...filterParams),
 
-  // Citation Categories
-  const citationRows = await db
-    .prepare(
+    db.prepare(
       `SELECT c.value, COUNT(DISTINCT mp.permid) AS count
        FROM minor_planets mp ${joins}
        JOIN categories c ON mp.permid = c.permid AND c.kind = 'citation'
        ${where}
        GROUP BY 1 ORDER BY count DESC, 1`
-    )
-    .bind(...filterParams)
-    .all<{ value: string; count: number }>();
+    ).bind(...filterParams),
 
-  // Discoverers
-  const discovererRows = await db
-    .prepare(
+    db.prepare(
       `SELECT df.value, COUNT(DISTINCT mp.permid) AS count
        FROM minor_planets mp ${joins}
        JOIN discovery_facets df ON mp.permid = df.permid AND df.kind = 'discoverer'
        ${where}
        GROUP BY 1 ORDER BY count DESC, 1 LIMIT 80`
-    )
-    .bind(...filterParams)
-    .all<{ value: string; count: number }>();
+    ).bind(...filterParams),
 
-  // Observatories
-  const observatoryRows = await db
-    .prepare(
+    db.prepare(
       `SELECT df.value, COUNT(DISTINCT mp.permid) AS count
        FROM minor_planets mp ${joins}
        JOIN discovery_facets df ON mp.permid = df.permid AND df.kind = 'observatory'
        ${where}
        GROUP BY 1 ORDER BY count DESC, 1 LIMIT 80`
-    )
-    .bind(...filterParams)
-    .all<{ value: string; count: number }>();
+    ).bind(...filterParams),
 
-  // Flags
-  const neoWhere = where ? `${where} AND mp.is_neo = 1` : "WHERE mp.is_neo = 1";
-  const phaWhere = where ? `${where} AND mp.is_pha = 1` : "WHERE mp.is_pha = 1";
-  
-  const neoRow = await db
-    .prepare(`SELECT COUNT(DISTINCT mp.permid) AS count FROM minor_planets mp ${joins} ${neoWhere}`)
-    .bind(...filterParams)
-    .first<{ count: number }>();
-    
-  const phaRow = await db
-    .prepare(`SELECT COUNT(DISTINCT mp.permid) AS count FROM minor_planets mp ${joins} ${phaWhere}`)
-    .bind(...filterParams)
-    .first<{ count: number }>();
+    db.prepare(`SELECT COUNT(DISTINCT mp.permid) AS count FROM minor_planets mp ${joins} ${neoWhere}`)
+      .bind(...filterParams),
+
+    db.prepare(`SELECT COUNT(DISTINCT mp.permid) AS count FROM minor_planets mp ${joins} ${phaWhere}`)
+      .bind(...filterParams),
+  ]);
 
   return {
-    orbit_types: orbitRows.results,
-    citation_categories: citationRows.results,
-    discoverers: discovererRows.results,
-    observatories: observatoryRows.results,
+    orbit_types: orbitRes.results as { value: string; count: number }[],
+    citation_categories: citationRes.results as { value: string; count: number }[],
+    discoverers: discovererRes.results as { value: string; count: number }[],
+    observatories: observatoryRes.results as { value: string; count: number }[],
     flags: [
-      { value: "NEO", count: neoRow?.count ?? 0 },
-      { value: "PHA", count: phaRow?.count ?? 0 },
+      { value: "NEO", count: (neoRes.results[0] as { count: number })?.count ?? 0 },
+      { value: "PHA", count: (phaRes.results[0] as { count: number })?.count ?? 0 },
     ],
   };
 }

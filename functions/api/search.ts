@@ -27,18 +27,12 @@ export const onRequestGet: PagesFunction<Env> = async (ctx) => {
   const repQ = representativeQuery(filterArgs.q);
   const { orderBy, params: orderParams } = buildOrderBy(sort, direction, repQ);
 
-  // Count
-  const countRow = await db
-    .prepare(
+  // Execute count and items queries concurrently
+  const [countRes, itemsRes] = await db.batch([
+    db.prepare(
       `SELECT COUNT(DISTINCT mp.permid) AS total FROM minor_planets mp ${joins} ${where}`
-    )
-    .bind(...filterParams)
-    .first<{ total: number }>();
-  const total = countRow?.total ?? 0;
-
-  // Items
-  const stmt = db
-    .prepare(
+    ).bind(...filterParams),
+    db.prepare(
       `SELECT DISTINCT
          mp.permid, mp.name_ascii, mp.name_display, mp.iau_designation,
          mp.citation_text, mp.discovery_date, mp.discovery_site,
@@ -47,10 +41,11 @@ export const onRequestGet: PagesFunction<Env> = async (ctx) => {
        FROM minor_planets mp
        ${joins} ${where} ${orderBy}
        LIMIT ? OFFSET ?`
-    )
-    .bind(...filterParams, ...orderParams, limit, offset);
+    ).bind(...filterParams, ...orderParams, limit, offset),
+  ]);
 
-  const { results: rows } = await stmt.all<Record<string, unknown>>();
+  const total = (countRes.results[0] as { total: number })?.total ?? 0;
+  const rows = itemsRes.results as Record<string, unknown>[];
 
   // Build items with explicit typing
   const items: Array<Record<string, unknown> & { citation_categories: string[] }> = rows.map((row) => {

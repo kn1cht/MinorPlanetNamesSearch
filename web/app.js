@@ -55,6 +55,7 @@ const els = {
   sortField:           qs("#sortField"),
   sortDirection:       qs("#sortDirection"),
   results:             qs("#results"),
+  loadingOverlay:      qs("#loadingOverlay"),
   resultSummary:       qs("#resultSummary"),
   totalObjects:        qs("#totalObjects"),
   totalResults:        qs("#totalResults"),
@@ -320,27 +321,32 @@ async function loadStats() {
 
 async function refresh() {
   const params = currentParams();
-  const [searchData, wordData, facetData] = await Promise.all([
-    getJson(`/api/search?${params.toString()}`),
-    getJson(`/api/wordcloud?${params.toString()}`),
-    getJson(`/api/facets?${params.toString()}`),
-  ]);
-  state.total = searchData.total;
-  // 動的ファセットカウントを更新
-  state.allOrbitFacets        = _mergeFacets(state.allOrbitFacets,        facetData.orbit_types         || []);
-  state.allCitationFacets     = _mergeFacets(state.allCitationFacets,     facetData.citation_categories || []);
-  state.allDiscovererFacets   = _mergeFacets(state.allDiscovererFacets,   facetData.discoverers          || []);
-  state.allObservatoryFacets  = _mergeFacets(state.allObservatoryFacets,  facetData.observatories        || []);
-  state.allFlagFacets         = _mergeFacets(state.allFlagFacets,         facetData.flags               || []);
-  renderResults(searchData.items || []);
-  renderWordCloud(wordData.words || []);
-  renderActiveFilterTags();
-  updatePager();
-  // フィルターモーダルが開いている場合はファセット表示を更新
-  if (!els.filterModal.hidden) renderFacets();
-  // スクロールをトップに戻す
-  els.results.scrollTop = 0;
-  els.wordCloud.scrollTop = 0;
+  els.loadingOverlay.hidden = false;
+  try {
+    const [searchData, wordData, facetData] = await Promise.all([
+      getJson(`/api/search?${params.toString()}`),
+      getJson(`/api/wordcloud?${params.toString()}`),
+      getJson(`/api/facets?${params.toString()}`),
+    ]);
+    state.total = searchData.total;
+    // 動的ファセットカウントを更新
+    state.allOrbitFacets        = _mergeFacets(state.allOrbitFacets,        facetData.orbit_types         || []);
+    state.allCitationFacets     = _mergeFacets(state.allCitationFacets,     facetData.citation_categories || []);
+    state.allDiscovererFacets   = _mergeFacets(state.allDiscovererFacets,   facetData.discoverers          || []);
+    state.allObservatoryFacets  = _mergeFacets(state.allObservatoryFacets,  facetData.observatories        || []);
+    state.allFlagFacets         = _mergeFacets(state.allFlagFacets,         facetData.flags               || []);
+    renderResults(searchData.items || []);
+    renderWordCloud(wordData.words || []);
+    renderActiveFilterTags();
+    updatePager();
+    // フィルターモーダルが開いている場合はファセット表示を更新
+    if (!els.filterModal.hidden) renderFacets();
+    // スクロールをトップに戻す
+    els.results.scrollTop = 0;
+    els.wordCloud.scrollTop = 0;
+  } finally {
+    els.loadingOverlay.hidden = true;
+  }
 }
 
 /**
