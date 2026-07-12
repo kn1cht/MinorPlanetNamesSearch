@@ -1,0 +1,8 @@
+name = "mpnames"
+pages_build_output_dir = "./dist"
+compatibility_date = "2025-01-01"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "mpnames-db"
+database_id = "b28c4f31-48f2-4a19-b17c-ffe771ec75c6"

@@ -10,3 +10,10 @@ data/
 *.sqlite3
 *.log
 
+# Node.js
+node_modules/
+
+# Cloudflare build artifacts
+dist/
+.push-dump.sql
+.wrangler/
