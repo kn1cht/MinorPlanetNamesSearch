@@ -98,6 +98,65 @@ def classify_citation(
     return _select_best_labels(candidates)
 
 
+def extract_person_facets(
+    citation_text: str,
+    *,
+    model: str | None,
+    host: str | None = None,
+    timeout: float = 60.0,
+    think: bool = False,
+) -> dict[str, object]:
+    """Extract evidence-backed person-role and gender facets from one citation."""
+    selected_host = host or DEFAULT_HOST
+    selected_model = model or (list_models(host=selected_host)[:1] or [None])[0]
+    if not selected_model:
+        raise RuntimeError("No ollama model is available")
+    prompt = f'''You extract narrowly defined metadata from a minor-planet naming citation.
+
+Return ONLY valid JSON in this exact shape:
+{{"roles":[{{"value":"Scientist","evidence":"exact quotation"}}],"gender":{{"value":"Female","evidence":"exact quotation"}}}}
+
+Allowed role values are exactly:
+["Scientist","Cultural/Public Figure","Discoverer-relative/Friend"]
+
+Allowed gender values are exactly:
+["Female","Male","Unknown","Non-person","Multiple/Mixed"]
+
+Rules:
+- Add each role only if the citation explicitly supports it.
+- Scientist includes scientists, researchers, engineers, and programmers.
+- Cultural/Public Figure includes artists, writers, musicians, performers, athletes, and political/public figures.
+- Discoverer-relative/Friend applies only when the citation explicitly states a family, friend, or colleague relation to the discoverer.
+- Female, Male, and Multiple/Mixed require an explicit citation cue. Do not infer gender from a name, nationality, photograph, or external knowledge.
+- Mythological and fictional characters may receive Female or Male only with an explicit cue in this citation.
+- Use Unknown for a person-like entity with no explicit gender cue. Use Non-person for a place, organization, natural object, event, or other non-person entity.
+- Every non-empty evidence value MUST be an exact contiguous excerpt from the citation. Use an empty string when no evidence applies.
+
+Citation:
+{citation_text}
+'''
+    payload = json.dumps(
+        {
+            "model": selected_model,
+            "prompt": prompt,
+            "stream": False,
+            "format": "json",
+            "think": think,
+            "options": {"temperature": 0, "num_predict": 500 if think else 250},
+        }
+    ).encode("utf-8")
+    request = urllib.request.Request(
+        f"{selected_host.rstrip('/')}/api/generate",
+        data=payload,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        body = json.loads(response.read().decode("utf-8"))
+    parsed = _parse_json_value(str(body.get("response", "")).strip())
+    return parsed if isinstance(parsed, dict) else {}
+
+
 def _classify_once(
     citation_text: str,
     *,

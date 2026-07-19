@@ -7,6 +7,7 @@ import json
 import time
 import urllib.error
 import urllib.request
+import unicodedata
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -17,6 +18,7 @@ from .categories import normalize_citation_category
 from .mpcorb import OrbitRecord, parse_mpcorb_lines, parse_orbits_api_response
 from .mpnames_parser import NameRecord, parse_mpnames_html
 from .numbered_mps import DiscoveryRecord, parse_numbered_mps
+from .person_facets import PersonFacetClassifier
 from .progress import ProgressReporter, QUIET_PROGRESS
 from .settings import (
     IDENTIFIER_BATCH_SIZE,
@@ -32,7 +34,10 @@ from .settings import (
     ORBIT_LONG_PAUSE_EVERY_REQUESTS,
     ORBIT_LONG_PAUSE_SECONDS,
     ORBITS_URL,
+    WGSBN_ARCHIVE_URL,
+    WGSBN_INTER_REQUEST_DELAY_SECONDS,
 )
+from .wgsbn import parse_wgsbn_archive, parse_wgsbn_namings
 
 
 INGEST_MODES = {"add", "update", "reset", "repair"}
@@ -276,6 +281,58 @@ def reclassify_existing(
     return {"records": updated, "changed": changed, "classifier": classifier_mode, "category_filter": category_filter, "log_file": str(log_file) if log_fp else None}
 
 
+def classify_person_facets_existing(
+    db_path: Path,
+    *,
+    classifier_mode: str = "rules",
+    ollama_model: str | None = None,
+    ollama_host: str = OLLAMA_HOST,
+    ollama_timeout: float = 60.0,
+    ollama_think: bool = False,
+    limit: int | None = None,
+    progress: ProgressReporter = QUIET_PROGRESS,
+) -> dict[str, int | str]:
+    """Classify evidence-backed person roles and entity gender for local records."""
+    connection = db.connect(db_path)
+    db.initialize(connection)
+    classifier = PersonFacetClassifier(
+        mode=classifier_mode,
+        model=ollama_model,
+        host=ollama_host,
+        timeout=ollama_timeout,
+        think=ollama_think,
+    )
+    sql = """
+        SELECT mp.permid, mp.citation_text, GROUP_CONCAT(c.value, CHAR(31)) AS citation_values
+        FROM minor_planets AS mp
+        LEFT JOIN categories AS c ON c.permid = mp.permid AND c.kind = 'citation'
+        GROUP BY mp.permid
+        ORDER BY CAST(mp.permid AS INTEGER)
+    """
+    if limit is not None:
+        sql += " LIMIT ?"
+        rows = connection.execute(sql, (max(0, limit),)).fetchall()
+    else:
+        rows = connection.execute(sql).fetchall()
+
+    updated = unchanged = 0
+    progress.message(f"Classifying person facets for {len(rows)} records with classifier={classifier_mode}")
+    for index, row in enumerate(rows, start=1):
+        categories = str(row["citation_values"] or "").split(chr(31))
+        facets = classifier.classify(row["citation_text"], categories)
+        if db._citation_facets_match(connection, row["permid"], facets):
+            unchanged += 1
+        else:
+            db.replace_citation_facets(connection, row["permid"], facets)
+            updated += 1
+        if _should_report_item(index, len(rows)):
+            progress.step("Person facet classify", index, len(rows), detail=f"updated={updated}")
+
+    connection.commit()
+    connection.close()
+    return {"records": len(rows), "updated": updated, "unchanged": unchanged, "classifier": classifier_mode}
+
+
 def enrich_discovery_existing(
     db_path: Path,
     *,
@@ -329,6 +386,174 @@ def enrich_discovery_existing(
     connection.close()
     progress.message("Discovery enrichment complete")
     return {"records": total, "updated": updated, "unchanged": unchanged, "missing": missing}
+
+
+def enrich_naming_publications(
+    db_path: Path,
+    *,
+    archive_url: str = WGSBN_ARCHIVE_URL,
+    delay: float = WGSBN_INTER_REQUEST_DELAY_SECONDS,
+    refresh: bool = False,
+    progress: ProgressReporter = QUIET_PROGRESS,
+) -> dict[str, Any]:
+    """Collect WGSBN Bulletins and attach official naming publication dates.
+
+    WGSBN JSON files are authoritative for Bulletins beginning in 2021.  The
+    archive list supplies each issue's publication date; each JSON record is
+    joined to the local MPC data by permanent minor-planet number.
+    """
+    if delay < 0:
+        raise ValueError("delay must be greater than or equal to zero")
+
+    connection = db.connect(db_path)
+    db.initialize(connection)
+    progress.message(f"Fetching WGSBN Bulletin archive from {archive_url}")
+    bulletins = parse_wgsbn_archive(_read_text_url(archive_url), archive_url)
+    if not bulletins:
+        connection.close()
+        raise ValueError("No WGSBN Bulletin JSON files found in archive")
+
+    known_urls = db.existing_wgsbn_bulletin_urls(connection)
+    selected = bulletins if refresh else [bulletin for bulletin in bulletins if bulletin.source_url not in known_urls]
+    fetched_bulletins = fetched_namings = 0
+    progress.message(
+        f"Found {len(bulletins)} WGSBN Bulletins; fetching {len(selected)} "
+        f"({'refresh' if refresh else 'new'} records)"
+    )
+    for index, bulletin in enumerate(selected, start=1):
+        progress.step(
+            "WGSBN Bulletin",
+            index,
+            len(selected),
+            detail=f"V{bulletin.volume}, #{bulletin.issue} ({bulletin.published_date})",
+        )
+        namings = parse_wgsbn_namings(_read_text_url(bulletin.source_url))
+        fetched_namings += db.replace_wgsbn_bulletin(
+            connection,
+            source_url=bulletin.source_url,
+            volume=bulletin.volume,
+            issue=bulletin.issue,
+            published_date=bulletin.published_date,
+            namings=namings,
+        )
+        fetched_bulletins += 1
+        if delay and index < len(selected):
+            time.sleep(delay)
+
+    metadata = db.sync_wgsbn_naming_metadata(connection)
+    connection.commit()
+    connection.close()
+    progress.message(
+        "WGSBN naming enrichment complete "
+        f"(updated={metadata['updated']} unchanged={metadata['unchanged']} missing={metadata['missing']})"
+    )
+    return {
+        "bulletins": len(bulletins),
+        "fetched_bulletins": fetched_bulletins,
+        "fetched_namings": fetched_namings,
+        **metadata,
+    }
+
+
+def backfill_wgsbn_only(
+    db_path: Path,
+    *,
+    permids: list[str],
+    classifier_mode: str = "ollama",
+    ollama_model: str | None = None,
+    ollama_host: str = OLLAMA_HOST,
+    ollama_timeout: float = 60.0,
+    ollama_think: bool = False,
+    ollama_think_on_review: bool = True,
+    progress: ProgressReporter = QUIET_PROGRESS,
+) -> dict[str, int | str]:
+    """Add selected WGSBN-named objects that are absent from MPC name data.
+
+    This is deliberately an explicit opt-in: a recent local MPC snapshot can
+    temporarily lag the WGSBN archive, so every unmatched Bulletin record
+    should not automatically become a permanent local record.
+    """
+    normalized_permids = list(dict.fromkeys(str(permid).strip() for permid in permids if str(permid).strip()))
+    if not normalized_permids:
+        raise ValueError("At least one permanent minor-planet number is required")
+
+    connection = db.connect(db_path)
+    db.initialize(connection)
+    classifier = CitationClassifier(
+        mode=classifier_mode,
+        model=ollama_model,
+        host=ollama_host,
+        timeout=ollama_timeout,
+        think=ollama_think,
+        think_on_review=ollama_think_on_review,
+    )
+    inserted = updated = unchanged = missing = 0
+    for index, permid in enumerate(normalized_permids, start=1):
+        publication = connection.execute(
+            """
+            SELECT permid, name, citation_text, published_date, reference, source_url
+            FROM naming_publications
+            WHERE permid = ?
+            ORDER BY published_date, source_url
+            LIMIT 1
+            """,
+            (permid,),
+        ).fetchone()
+        if publication is None:
+            missing += 1
+            continue
+
+        citation_text = publication["citation_text"]
+        categories = classifier.classify(citation_text)
+        status = db.upsert_minor_planet(
+            connection,
+            permid=permid,
+            name_ascii=_ascii_name(publication["name"]),
+            name_display=publication["name"],
+            identifier={
+                "permid": permid,
+                "iau_designation": f"({permid})",
+                "citation": citation_text,
+            },
+            citation_categories=categories,
+        )
+        connection.execute(
+            """
+            UPDATE minor_planets
+            SET naming_published_date = ?, naming_reference = ?,
+                naming_source = 'WGSBN Bulletin', naming_source_url = ?
+            WHERE permid = ?
+            """,
+            (
+                publication["published_date"],
+                publication["reference"],
+                publication["source_url"],
+                permid,
+            ),
+        )
+        if status == "inserted":
+            inserted += 1
+        elif status == "updated":
+            updated += 1
+        else:
+            unchanged += 1
+        progress.step("WGSBN-only backfill", index, len(normalized_permids), detail=permid)
+
+    connection.commit()
+    connection.close()
+    return {
+        "records": len(normalized_permids),
+        "inserted": inserted,
+        "updated": updated,
+        "unchanged": unchanged,
+        "missing": missing,
+        "classifier": classifier_mode,
+    }
+
+
+def _ascii_name(name: str) -> str:
+    """Make an MPC-list-compatible ASCII search form while retaining display text."""
+    return unicodedata.normalize("NFKD", name).encode("ascii", "ignore").decode("ascii")
 
 
 def _normalize_category_filters(values: list[str]) -> list[str]:

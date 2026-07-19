@@ -13,6 +13,7 @@ from .categories import Category, categorize_citation
 from .latex import decode_latex
 from .mpcorb import OrbitRecord
 from .numbered_mps import DiscoveryRecord
+from .person_facets import CitationFacet, PersonFacetClassifier
 from .settings import DEFAULT_DB
 
 
@@ -92,6 +93,10 @@ def initialize(connection: sqlite3.Connection) -> None:
             iau_designation TEXT,
             citation_html TEXT,
             citation_text TEXT,
+            naming_published_date TEXT,
+            naming_reference TEXT,
+            naming_source TEXT,
+            naming_source_url TEXT,
             discovery_date TEXT,
             discovery_site TEXT,
             discoverer_text TEXT,
@@ -131,6 +136,20 @@ def initialize(connection: sqlite3.Connection) -> None:
             FOREIGN KEY (permid) REFERENCES minor_planets(permid) ON DELETE CASCADE
         );
 
+        CREATE TABLE IF NOT EXISTS citation_facets (
+            permid TEXT NOT NULL,
+            kind TEXT NOT NULL,
+            value TEXT NOT NULL,
+            evidence_text TEXT,
+            source TEXT NOT NULL,
+            confidence REAL NOT NULL,
+            PRIMARY KEY (permid, kind, value, source),
+            FOREIGN KEY (permid) REFERENCES minor_planets(permid) ON DELETE CASCADE
+        );
+
+        CREATE INDEX IF NOT EXISTS citation_facets_kind_value
+        ON citation_facets(kind, value, permid);
+
         CREATE TABLE IF NOT EXISTS discovery_facets (
             permid TEXT NOT NULL,
             kind TEXT NOT NULL,
@@ -153,6 +172,27 @@ def initialize(connection: sqlite3.Connection) -> None:
             response_json TEXT NOT NULL,
             updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
         );
+
+        CREATE TABLE IF NOT EXISTS wgsbn_bulletins (
+            source_url TEXT PRIMARY KEY,
+            volume INTEGER NOT NULL,
+            issue INTEGER NOT NULL,
+            published_date TEXT NOT NULL,
+            fetched_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE TABLE IF NOT EXISTS naming_publications (
+            permid TEXT NOT NULL,
+            source_url TEXT NOT NULL,
+            published_date TEXT NOT NULL,
+            name TEXT NOT NULL,
+            citation_text TEXT,
+            reference TEXT,
+            PRIMARY KEY (permid, source_url)
+        );
+
+        CREATE INDEX IF NOT EXISTS naming_publications_permid_date
+        ON naming_publications(permid, published_date);
 
         CREATE VIRTUAL TABLE IF NOT EXISTS minor_planets_fts
         USING fts5(
@@ -225,7 +265,10 @@ def reset_database(connection: sqlite3.Connection) -> None:
     """Remove all locally stored ingest data."""
     connection.execute("DELETE FROM minor_planets")
     connection.execute("DELETE FROM discovery_facets")
+    connection.execute("DELETE FROM citation_facets")
     connection.execute("DELETE FROM identifier_cache")
+    connection.execute("DELETE FROM naming_publications")
+    connection.execute("DELETE FROM wgsbn_bulletins")
     connection.execute("DELETE FROM ingest_runs")
 
 
@@ -239,10 +282,112 @@ def _ensure_minor_planet_columns(connection: sqlite3.Connection) -> None:
         "discovery_site": "TEXT",
         "discoverer_text": "TEXT",
         "discovery_source": "TEXT",
+        "naming_published_date": "TEXT",
+        "naming_reference": "TEXT",
+        "naming_source": "TEXT",
+        "naming_source_url": "TEXT",
     }
     for name, column_type in required.items():
         if name not in existing:
             connection.execute(f"ALTER TABLE minor_planets ADD COLUMN {name} {column_type}")
+
+
+def existing_wgsbn_bulletin_urls(connection: sqlite3.Connection) -> set[str]:
+    return {
+        row["source_url"]
+        for row in connection.execute("SELECT source_url FROM wgsbn_bulletins").fetchall()
+    }
+
+
+def replace_wgsbn_bulletin(
+    connection: sqlite3.Connection,
+    *,
+    source_url: str,
+    volume: int,
+    issue: int,
+    published_date: str,
+    namings: list[Any],
+) -> int:
+    """Store the complete naming list for one WGSBN Bulletin."""
+    # A few official JSON files repeat an object in the same Bulletin (for
+    # example when a related correction is included).  The publication date is
+    # identical, so retain the first naming record for this date-level index.
+    unique_namings: dict[str, Any] = {}
+    for naming in namings:
+        unique_namings.setdefault(naming.permid, naming)
+    connection.execute("DELETE FROM naming_publications WHERE source_url = ?", (source_url,))
+    connection.executemany(
+        """
+        INSERT INTO naming_publications(permid, source_url, published_date, name, citation_text, reference)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        [
+            (naming.permid, source_url, published_date, naming.name, naming.citation, naming.reference)
+            for naming in unique_namings.values()
+        ],
+    )
+    connection.execute(
+        """
+        INSERT INTO wgsbn_bulletins(source_url, volume, issue, published_date)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT(source_url) DO UPDATE SET
+            volume = excluded.volume,
+            issue = excluded.issue,
+            published_date = excluded.published_date,
+            fetched_at = CURRENT_TIMESTAMP
+        """,
+        (source_url, volume, issue, published_date),
+    )
+    return len(unique_namings)
+
+
+def sync_wgsbn_naming_metadata(connection: sqlite3.Connection) -> dict[str, int]:
+    """Apply the earliest WGSBN publication date to locally stored minor planets."""
+    rows = connection.execute(
+        """
+        SELECT np.permid, np.published_date, np.reference, np.source_url
+        FROM naming_publications AS np
+        JOIN (
+            SELECT permid, MIN(published_date) AS published_date
+            FROM naming_publications
+            GROUP BY permid
+        ) AS first_publication
+          ON first_publication.permid = np.permid
+         AND first_publication.published_date = np.published_date
+        ORDER BY np.permid, np.source_url
+        """
+    ).fetchall()
+    selected: set[str] = set()
+    updated = unchanged = missing = 0
+    for row in rows:
+        permid = row["permid"]
+        if permid in selected:
+            continue
+        selected.add(permid)
+        current = connection.execute(
+            """
+            SELECT naming_published_date, naming_reference, naming_source, naming_source_url
+            FROM minor_planets WHERE permid = ?
+            """,
+            (permid,),
+        ).fetchone()
+        if current is None:
+            missing += 1
+            continue
+        values = (row["published_date"], row["reference"], "WGSBN Bulletin", row["source_url"])
+        if tuple(current) == values:
+            unchanged += 1
+            continue
+        connection.execute(
+            """
+            UPDATE minor_planets
+            SET naming_published_date = ?, naming_reference = ?, naming_source = ?, naming_source_url = ?
+            WHERE permid = ?
+            """,
+            (*values, permid),
+        )
+        updated += 1
+    return {"publications": len(selected), "updated": updated, "unchanged": unchanged, "missing": missing}
 
 
 def _ensure_fts_schema(connection: sqlite3.Connection) -> None:
@@ -358,6 +503,7 @@ def upsert_minor_planet(
     orbit: OrbitRecord | None = None,
     discovery: DiscoveryRecord | None = None,
     citation_categories: list[Category] | None = None,
+    citation_facets: list[CitationFacet] | None = None,
 ) -> str:
     identifier = identifier or {}
     values = minor_planet_values(
@@ -369,6 +515,13 @@ def upsert_minor_planet(
         discovery=discovery,
     )
     categories = _categories_for(values["citation_text"], orbit, citation_categories=citation_categories)
+    facets = (
+        list(citation_facets)
+        if citation_facets is not None
+        else PersonFacetClassifier(mode="rules").classify(
+            values["citation_text"], [category.value for category in categories if category.kind == "citation"]
+        )
+    )
     existing = connection.execute(
         f"SELECT {', '.join(values)} FROM minor_planets WHERE permid = ?",
         (values["permid"],),
@@ -379,6 +532,7 @@ def upsert_minor_planet(
         existing is not None
         and _row_matches(existing, values)
         and _categories_match(connection, values["permid"], categories)
+        and _citation_facets_match(connection, values["permid"], facets)
         and _discovery_facets_match(connection, values["permid"], discovery_values)
     ):
         return "unchanged"
@@ -398,6 +552,7 @@ def upsert_minor_planet(
     )
 
     replace_categories(connection, values["permid"], categories)
+    replace_citation_facets(connection, values["permid"], facets)
     replace_discovery_facets(connection, values["permid"], discovery_values)
     return status
 
@@ -475,6 +630,24 @@ def replace_citation_categories(
             (permid, category.kind, category.value, category.source, category.confidence)
             for category in categories
             if category.kind == "citation"
+        ],
+    )
+
+
+def replace_citation_facets(
+    connection: sqlite3.Connection,
+    permid: str,
+    facets: list[CitationFacet],
+) -> None:
+    connection.execute("DELETE FROM citation_facets WHERE permid = ?", (permid,))
+    connection.executemany(
+        """
+        INSERT OR REPLACE INTO citation_facets(permid, kind, value, evidence_text, source, confidence)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        [
+            (permid, facet.kind, facet.value, facet.evidence_text, facet.source, facet.confidence)
+            for facet in facets
         ],
     )
 
@@ -658,6 +831,26 @@ def _categories_match(connection: sqlite3.Connection, permid: str, categories: l
     return current == incoming
 
 
+def _citation_facets_match(connection: sqlite3.Connection, permid: str, facets: list[CitationFacet]) -> bool:
+    rows = connection.execute(
+        """
+        SELECT kind, value, evidence_text, source, confidence
+        FROM citation_facets
+        WHERE permid = ?
+        ORDER BY kind, value, source
+        """,
+        (permid,),
+    ).fetchall()
+    current = [
+        (row["kind"], row["value"], row["evidence_text"], row["source"], row["confidence"])
+        for row in rows
+    ]
+    incoming = sorted(
+        (facet.kind, facet.value, facet.evidence_text, facet.source, facet.confidence) for facet in facets
+    )
+    return current == incoming
+
+
 def search(
     connection: sqlite3.Connection,
     *,
@@ -666,6 +859,8 @@ def search(
     q_target: str = "both",
     orbit: str | list[str] = "",
     citation_category: str | list[str] = "",
+    person_role: str | list[str] = "",
+    gender: str | list[str] = "",
     discoverer: str | list[str] = "",
     observatory: str | list[str] = "",
     flag: str | list[str] = "",
@@ -680,6 +875,8 @@ def search(
         q_target=q_target,
         orbit=orbit,
         citation_category=citation_category,
+        person_role=person_role,
+        gender=gender,
         discoverer=discoverer,
         observatory=observatory,
         flag=flag,
@@ -724,6 +921,7 @@ def search(
 
     items = [_row_to_search_item(row, q=q) for row in rows]
     _attach_citation_categories(connection, items)
+    _attach_citation_facets(connection, items)
 
     return {
         "total": total,
@@ -737,6 +935,8 @@ def search(
             q_target=q_target,
             orbit=orbit,
             citation_category=citation_category,
+            person_role=person_role,
+            gender=gender,
             discoverer=discoverer,
             observatory=observatory,
             flag=flag,
@@ -757,6 +957,16 @@ def get_object(connection: sqlite3.Connection, permid: str) -> dict[str, Any] | 
     data["is_one_km_neo"] = bool(data["is_one_km_neo"])
     data["is_pha"] = bool(data["is_pha"])
     data["categories"] = [dict(category) for category in categories]
+    data["citation_facets"] = [
+        dict(facet)
+        for facet in connection.execute(
+            """
+            SELECT kind, value, evidence_text, source, confidence
+            FROM citation_facets WHERE permid = ? ORDER BY kind, value, source
+            """,
+            (permid,),
+        ).fetchall()
+    ]
     # Citation text is intentionally omitted from the detail API response.
     # Users are directed to the official MPC/WGSBN source via an external link.
     data.pop("citation_text", None)
@@ -773,6 +983,14 @@ def stats(connection: sqlite3.Connection) -> dict[str, Any]:
     ).fetchall()
     citation_rows = connection.execute(
         "SELECT value, COUNT(*) AS count FROM categories WHERE kind = 'citation' "
+        "GROUP BY 1 ORDER BY count DESC, 1"
+    ).fetchall()
+    person_role_rows = connection.execute(
+        "SELECT value, COUNT(*) AS count FROM citation_facets WHERE kind = 'person_role' "
+        "GROUP BY 1 ORDER BY count DESC, 1"
+    ).fetchall()
+    gender_rows = connection.execute(
+        "SELECT value, COUNT(*) AS count FROM citation_facets WHERE kind = 'entity_gender' "
         "GROUP BY 1 ORDER BY count DESC, 1"
     ).fetchall()
     discoverer_rows = connection.execute(
@@ -792,6 +1010,8 @@ def stats(connection: sqlite3.Connection) -> dict[str, Any]:
         "latest_updated_at": latest,
         "orbit_types": [dict(row) for row in orbit_rows],
         "citation_categories": [dict(row) for row in citation_rows],
+        "person_roles": [dict(row) for row in person_role_rows],
+        "genders": [dict(row) for row in gender_rows],
         "discoverers": [dict(row) for row in discoverer_rows],
         "observatories": [dict(row) for row in observatory_rows],
         "flags": flag_rows,
@@ -806,6 +1026,8 @@ def wordcloud(
     q_target: str = "both",
     orbit: str | list[str] = "",
     citation_category: str | list[str] = "",
+    person_role: str | list[str] = "",
+    gender: str | list[str] = "",
     discoverer: str | list[str] = "",
     observatory: str | list[str] = "",
     flag: str | list[str] = "",
@@ -817,6 +1039,8 @@ def wordcloud(
         q_target=q_target,
         orbit=orbit,
         citation_category=citation_category,
+        person_role=person_role,
+        gender=gender,
         discoverer=discoverer,
         observatory=observatory,
         flag=flag,
@@ -847,6 +1071,8 @@ def facets(
     q_target: str = "both",
     orbit: str | list[str] = "",
     citation_category: str | list[str] = "",
+    person_role: str | list[str] = "",
+    gender: str | list[str] = "",
     discoverer: str | list[str] = "",
     observatory: str | list[str] = "",
     flag: str | list[str] = "",
@@ -857,6 +1083,8 @@ def facets(
         q_target=q_target,
         orbit=orbit,
         citation_category=citation_category,
+        person_role=person_role,
+        gender=gender,
         discoverer=discoverer,
         observatory=observatory,
         flag=flag,
@@ -880,6 +1108,8 @@ def facets(
         """,
         params,
     ).fetchall()
+    person_role_rows = _citation_facet_rows(connection, joins, where, params, "person_role")
+    gender_rows = _citation_facet_rows(connection, joins, where, params, "entity_gender")
     discoverer_rows = _discovery_facet_rows(connection, joins, where, params, "discoverer")
     observatory_rows = _discovery_facet_rows(connection, joins, where, params, "observatory")
     neo_count = _facet_flag_count(connection, joins, where, params, "mp.is_neo = 1")
@@ -887,6 +1117,8 @@ def facets(
     return {
         "orbit_types": [dict(row) for row in orbit_rows],
         "citation_categories": [dict(row) for row in citation_rows],
+        "person_roles": [dict(row) for row in person_role_rows],
+        "genders": [dict(row) for row in gender_rows],
         "discoverers": [dict(row) for row in discoverer_rows],
         "observatories": [dict(row) for row in observatory_rows],
         "flags": [{"value": "NEO", "count": neo_count}, {"value": "PHA", "count": pha_count}],
@@ -909,6 +1141,26 @@ def _discovery_facet_rows(
         {where}
         GROUP BY df2.value ORDER BY count DESC, 1
         LIMIT 80
+        """,
+        [kind, *params],
+    ).fetchall()
+
+
+def _citation_facet_rows(
+    connection: sqlite3.Connection,
+    joins: str,
+    where: str,
+    params: list[Any],
+    kind: str,
+) -> list[sqlite3.Row]:
+    return connection.execute(
+        f"""
+        SELECT cf2.value AS value, COUNT(DISTINCT mp.permid) AS count
+        FROM minor_planets mp
+        {joins}
+        JOIN citation_facets cf2 ON cf2.permid = mp.permid AND cf2.kind = ?
+        {where}
+        GROUP BY cf2.value ORDER BY count DESC, 1
         """,
         [kind, *params],
     ).fetchall()
@@ -962,6 +1214,8 @@ def _filters(
     q_target: str = "both",
     orbit: str | list[str] = "",
     citation_category: str | list[str] = "",
+    person_role: str | list[str] = "",
+    gender: str | list[str] = "",
     discoverer: str | list[str] = "",
     observatory: str | list[str] = "",
     flag: str | list[str] = "",
@@ -1001,6 +1255,24 @@ def _filters(
         joins.append("JOIN categories c_filter ON c_filter.permid = mp.permid")
         clauses.append(f"c_filter.kind = 'citation' AND c_filter.value IN ({_placeholders(citation_values)})")
         params.extend(citation_values)
+
+    person_role_values = _normalize_filter_values(person_role)
+    if person_role_values:
+        joins.append("JOIN citation_facets cf_role_filter ON cf_role_filter.permid = mp.permid")
+        clauses.append(
+            "cf_role_filter.kind = 'person_role' "
+            f"AND cf_role_filter.value IN ({_placeholders(person_role_values)})"
+        )
+        params.extend(person_role_values)
+
+    gender_values = _normalize_filter_values(gender)
+    if gender_values:
+        joins.append("JOIN citation_facets cf_gender_filter ON cf_gender_filter.permid = mp.permid")
+        clauses.append(
+            "cf_gender_filter.kind = 'entity_gender' "
+            f"AND cf_gender_filter.value IN ({_placeholders(gender_values)})"
+        )
+        params.extend(gender_values)
 
     discoverer_values = _normalize_filter_values(discoverer, split_commas=False)
     if discoverer_values:
@@ -1300,6 +1572,8 @@ def _row_to_search_item(row: sqlite3.Row, q: str | list[str] = "") -> dict[str, 
     data["is_neo"] = bool(data["is_neo"])
     data["is_pha"] = bool(data["is_pha"])
     data["citation_categories"] = []
+    data["person_roles"] = []
+    data["gender"] = None
     citation = data.get("citation_text") or ""
     data["citation_snippet"] = _make_citation_snippet(citation, _representative_query(q))
     data.pop("citation_text", None)
@@ -1325,3 +1599,28 @@ def _attach_citation_categories(connection: sqlite3.Connection, items: list[dict
         by_permid.setdefault(row["permid"], []).append(row["value"])
     for item in items:
         item["citation_categories"] = by_permid.get(item["permid"], [])
+
+
+def _attach_citation_facets(connection: sqlite3.Connection, items: list[dict[str, Any]]) -> None:
+    if not items:
+        return
+    permids = [item["permid"] for item in items]
+    rows = connection.execute(
+        f"""
+        SELECT permid, kind, value
+        FROM citation_facets
+        WHERE permid IN ({_placeholders(permids)})
+        ORDER BY kind, value
+        """,
+        permids,
+    ).fetchall()
+    roles = {permid: [] for permid in permids}
+    genders: dict[str, str] = {}
+    for row in rows:
+        if row["kind"] == "person_role":
+            roles.setdefault(row["permid"], []).append(row["value"])
+        elif row["kind"] == "entity_gender":
+            genders[row["permid"]] = row["value"]
+    for item in items:
+        item["person_roles"] = roles.get(item["permid"], [])
+        item["gender"] = genders.get(item["permid"])

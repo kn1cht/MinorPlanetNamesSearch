@@ -288,7 +288,9 @@ class DatabaseTests(unittest.TestCase):
         self.assertEqual({item["name_ascii"] for item in result["items"]}, {"Apollo", "Aten"})
 
     def test_multi_citation_category_filter_uses_or_semantics(self):
-        result = db.search(self.connection, citation_category=["Mythology", "Place"])
+        result = db.search(
+            self.connection, citation_category=["Mythology", "Country/Region/Town"]
+        )
         names = {item["name_ascii"] for item in result["items"]}
         self.assertIn("Apollo", names)
         self.assertIn("Aachen", names)

@@ -123,6 +123,14 @@
           <span id="wordCount" class="word-count-badge">—</span>
         </div>
         <div id="wordCloud" class="word-cloud" aria-label="Keyword frequency"></div>
+        <section id="genderStats" class="gender-stats" aria-live="polite">
+          <div class="gender-stats-header">
+            <span data-i18n="side.gender_stats">性別統計</span>
+            <span id="genderStatsTotal" class="word-count-badge">—</span>
+          </div>
+          <div id="genderStatsBar" class="gender-stats-bar" role="img"></div>
+          <div id="genderStatsLegend" class="gender-stats-legend"></div>
+        </section>
       </div>
     </aside>
   </div>
@@ -145,6 +153,14 @@
         <div class="filter-section">
           <div class="filter-section-title" data-i18n="modal.citation">命名カテゴリ</div>
           <div id="citationFilters" class="check-list" aria-label="命名カテゴリフィルタ"></div>
+        </div>
+        <div class="filter-section">
+          <div class="filter-section-title" data-i18n="modal.person_role">人物ロール</div>
+          <div id="personRoleFilters" class="check-list" aria-label="人物ロールフィルタ"></div>
+        </div>
+        <div class="filter-section">
+          <div class="filter-section-title" data-i18n="modal.gender">性別</div>
+          <div id="genderFilters" class="check-list compact" aria-label="性別フィルタ"></div>
         </div>
         <div class="filter-section">
           <div class="filter-section-title" data-i18n="modal.discoverer">発見者</div>

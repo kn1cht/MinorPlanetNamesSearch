@@ -12,6 +12,8 @@ NUMBERED_MPS_URL = "https://www.minorplanetcenter.net/iau/lists/NumberedMPs.txt"
 NUMBERED_MPS_CACHE = Path("data/NumberedMPs.txt")
 IDENTIFIER_URL = "https://data.minorplanetcenter.net/api/query-identifier"
 ORBITS_URL = "https://data.minorplanetcenter.net/api/get-orb"
+WGSBN_ARCHIVE_URL = "https://www.wgsbn-iau.org/files/json/index.html"
+WGSBN_INTER_REQUEST_DELAY_SECONDS = 0.1
 
 IDENTIFIER_BATCH_SIZE = 10
 IDENTIFIER_INTER_REQUEST_DELAY_SECONDS = 0.05

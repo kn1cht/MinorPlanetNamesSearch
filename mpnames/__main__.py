@@ -6,7 +6,16 @@ import argparse
 from pathlib import Path
 
 from . import db
-from .ingest import INGEST_MODES, enrich_discovery_existing, ingest, init_sample, reclassify_existing
+from .ingest import (
+    INGEST_MODES,
+    backfill_wgsbn_only,
+    classify_person_facets_existing,
+    enrich_discovery_existing,
+    enrich_naming_publications,
+    ingest,
+    init_sample,
+    reclassify_existing,
+)
 from .ollama import is_ollama_available
 from .progress import ProgressReporter
 from .server import serve
@@ -19,6 +28,7 @@ from .settings import (
     ORBIT_INTER_REQUEST_DELAY_SECONDS,
     ORBIT_LONG_PAUSE_EVERY_REQUESTS,
     ORBIT_LONG_PAUSE_SECONDS,
+    WGSBN_INTER_REQUEST_DELAY_SECONDS,
 )
 
 
@@ -72,6 +82,19 @@ def main(argv: list[str] | None = None) -> int:
     )
     reclassify_parser.add_argument("--quiet", action="store_true", help="Hide progress output")
 
+    person_facets_parser = subparsers.add_parser(
+        "classify-person-facets",
+        help="Classify evidence-backed person roles and entity gender from citations",
+    )
+    person_facets_parser.add_argument("--db", default=str(db.DEFAULT_DB))
+    person_facets_parser.add_argument("--classifier", choices=["rules", "auto", "ollama"], default="rules")
+    person_facets_parser.add_argument("--ollama-model", default=None)
+    person_facets_parser.add_argument("--ollama-host", default=OLLAMA_HOST)
+    person_facets_parser.add_argument("--limit", type=int, default=None)
+    person_facets_parser.add_argument("--timeout", type=float, default=60.0)
+    person_facets_parser.add_argument("--think", action="store_true", default=False)
+    person_facets_parser.add_argument("--quiet", action="store_true", help="Hide progress output")
+
     discovery_parser = subparsers.add_parser(
         "enrich-discovery",
         help="Fill discovery date/site/discoverer fields from cached NumberedMPs.txt",
@@ -80,6 +103,28 @@ def main(argv: list[str] | None = None) -> int:
     discovery_parser.add_argument("--limit", type=int, default=None)
     discovery_parser.add_argument("--refresh-cache", action="store_true", help="Download NumberedMPs.txt again")
     discovery_parser.add_argument("--quiet", action="store_true", help="Hide progress output")
+
+    naming_parser = subparsers.add_parser(
+        "enrich-naming-publications",
+        help="Collect WGSBN Bulletin publication dates for named minor planets",
+    )
+    naming_parser.add_argument("--db", default=str(db.DEFAULT_DB))
+    naming_parser.add_argument("--refresh", action="store_true", help="Re-download already collected Bulletins")
+    naming_parser.add_argument("--delay", type=float, default=WGSBN_INTER_REQUEST_DELAY_SECONDS)
+    naming_parser.add_argument("--quiet", action="store_true", help="Hide progress output")
+
+    wgsbn_only_parser = subparsers.add_parser(
+        "backfill-wgsbn-only",
+        help="Add explicitly selected WGSBN names that remain absent from MPC name data",
+    )
+    wgsbn_only_parser.add_argument("--db", default=str(db.DEFAULT_DB))
+    wgsbn_only_parser.add_argument("--permid", action="append", required=True, help="Permanent number; repeat as needed")
+    wgsbn_only_parser.add_argument("--classifier", choices=["rules", "auto", "ollama"], default="ollama")
+    wgsbn_only_parser.add_argument("--ollama-model", default=None)
+    wgsbn_only_parser.add_argument("--ollama-host", default=OLLAMA_HOST)
+    wgsbn_only_parser.add_argument("--timeout", type=float, default=60.0)
+    wgsbn_only_parser.add_argument("--think", action="store_true", default=False)
+    wgsbn_only_parser.add_argument("--quiet", action="store_true", help="Hide progress output")
 
     serve_parser = subparsers.add_parser("serve", help="Run the local Web UI and API")
     serve_parser.add_argument("--db", default=str(db.DEFAULT_DB))
@@ -150,6 +195,23 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Reclassified {result['records']} records{filter_text} using {result['classifier']}.")
         return 0
 
+    if args.command == "classify-person-facets":
+        result = classify_person_facets_existing(
+            Path(args.db),
+            classifier_mode=args.classifier,
+            ollama_model=args.ollama_model,
+            ollama_host=args.ollama_host,
+            ollama_timeout=args.timeout,
+            ollama_think=args.think,
+            limit=args.limit,
+            progress=ProgressReporter(enabled=not args.quiet),
+        )
+        print(
+            f"Person facets: {result['updated']} updated, {result['unchanged']} unchanged "
+            f"of {result['records']} records; classifier={result['classifier']}."
+        )
+        return 0
+
     if args.command == "enrich-discovery":
         result = enrich_discovery_existing(
             Path(args.db),
@@ -160,6 +222,38 @@ def main(argv: list[str] | None = None) -> int:
         print(
             f"Discovery enrich: scanned {result['records']} records; "
             f"updated {result['updated']}, unchanged {result['unchanged']}, missing {result['missing']}."
+        )
+        return 0
+
+    if args.command == "enrich-naming-publications":
+        result = enrich_naming_publications(
+            Path(args.db),
+            delay=args.delay,
+            refresh=args.refresh,
+            progress=ProgressReporter(enabled=not args.quiet),
+        )
+        print(
+            f"WGSBN naming enrich: {result['updated']} updated, {result['unchanged']} unchanged, "
+            f"{result['missing']} not in local MPC data; "
+            f"{result['fetched_bulletins']} Bulletins / {result['fetched_namings']} namings fetched."
+        )
+        return 0
+
+    if args.command == "backfill-wgsbn-only":
+        result = backfill_wgsbn_only(
+            Path(args.db),
+            permids=args.permid,
+            classifier_mode=args.classifier,
+            ollama_model=args.ollama_model,
+            ollama_host=args.ollama_host,
+            ollama_timeout=args.timeout,
+            ollama_think=args.think,
+            progress=ProgressReporter(enabled=not args.quiet),
+        )
+        print(
+            f"WGSBN-only backfill: inserted {result['inserted']}, updated {result['updated']}, unchanged {result['unchanged']}, "
+            f"missing {result['missing']} of {result['records']} requested; "
+            f"classifier={result['classifier']}."
         )
         return 0
 

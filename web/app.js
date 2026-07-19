@@ -8,6 +8,8 @@ const state = {
   queryTarget: "both",
   orbits: [],
   citationCategories: [],
+  personRoles: [],
+  genders: [],
   discoverers: [],
   observatories: [],
   flags: [],
@@ -19,6 +21,8 @@ const state = {
   selectedPermid: null,
   allOrbitFacets: [],
   allCitationFacets: [],
+  allPersonRoleFacets: [],
+  allGenderFacets: [],
   allDiscovererFacets: [],
   allObservatoryFacets: [],
   allFlagFacets: [],
@@ -28,6 +32,8 @@ const state = {
 const FILTER_META = {
   orbits:            { label: "軌道",       kind: "orbit" },
   citationCategories:{ label: "命名",       kind: "citation" },
+  personRoles:       { label: "人物ロール", kind: "person_role" },
+  genders:           { label: "性別",       kind: "gender" },
   discoverers:       { label: "発見者",     kind: "discoverer" },
   observatories:     { label: "観測所",     kind: "observatory" },
   flags:             { label: "フラグ",     kind: "flag" },
@@ -45,6 +51,8 @@ const els = {
   activeFilterTags:    qs("#activeFilterTags"),
   orbitFilters:        qs("#orbitFilters"),
   citationFilters:     qs("#citationFilters"),
+  personRoleFilters:   qs("#personRoleFilters"),
+  genderFilters:       qs("#genderFilters"),
   discovererFilters:   qs("#discovererFilters"),
   observatoryFilters:  qs("#observatoryFilters"),
   flagFilters:         qs("#flagFilters"),
@@ -69,6 +77,10 @@ const els = {
   lastPage:            qs("#lastPage"),
   wordCloud:           qs("#wordCloud"),
   wordCount:           qs("#wordCount"),
+  genderStats:         qs("#genderStats"),
+  genderStatsTotal:    qs("#genderStatsTotal"),
+  genderStatsBar:      qs("#genderStatsBar"),
+  genderStatsLegend:   qs("#genderStatsLegend"),
   detailBody:          qs("#detailBody"),
   sidePanel:           qs("#sidePanel"),
   closeSidePanel:      qs("#closeSidePanel"),
@@ -261,6 +273,8 @@ function resetAllConditions() {
   state.queryTarget = "both";
   state.orbits = [];
   state.citationCategories = [];
+  state.personRoles = [];
+  state.genders = [];
   state.discoverers = [];
   state.observatories = [];
   state.flags = [];
@@ -281,6 +295,8 @@ function hasAnyActiveCondition() {
   return state.queryTerms.length > 0
     || state.orbits.length > 0
     || state.citationCategories.length > 0
+    || state.personRoles.length > 0
+    || state.genders.length > 0
     || state.discoverers.length > 0
     || state.observatories.length > 0
     || state.flags.length > 0;
@@ -314,6 +330,8 @@ async function loadStats() {
   }
   state.allOrbitFacets        = stats.orbit_types         || [];
   state.allCitationFacets     = stats.citation_categories || [];
+  state.allPersonRoleFacets   = stats.person_roles         || [];
+  state.allGenderFacets       = stats.genders              || [];
   state.allDiscovererFacets   = stats.discoverers          || [];
   state.allObservatoryFacets  = stats.observatories        || [];
   state.allFlagFacets         = stats.flags               || [];
@@ -332,11 +350,14 @@ async function refresh() {
     // 動的ファセットカウントを更新
     state.allOrbitFacets        = _mergeFacets(state.allOrbitFacets,        facetData.orbit_types         || []);
     state.allCitationFacets     = _mergeFacets(state.allCitationFacets,     facetData.citation_categories || []);
+    state.allPersonRoleFacets   = _mergeFacets(state.allPersonRoleFacets,   facetData.person_roles         || []);
+    state.allGenderFacets       = _mergeFacets(state.allGenderFacets,       facetData.genders              || []);
     state.allDiscovererFacets   = _mergeFacets(state.allDiscovererFacets,   facetData.discoverers          || []);
     state.allObservatoryFacets  = _mergeFacets(state.allObservatoryFacets,  facetData.observatories        || []);
     state.allFlagFacets         = _mergeFacets(state.allFlagFacets,         facetData.flags               || []);
     renderResults(searchData.items || []);
     renderWordCloud(wordData.words || []);
+    renderGenderStats(facetData.genders || []);
     renderActiveFilterTags();
     updatePager();
     // フィルターモーダルが開いている場合はファセット表示を更新
@@ -359,6 +380,8 @@ async function refreshFacetsOnly() {
     const facetData = await getJson(`/api/facets?${params.toString()}`);
     state.allOrbitFacets        = _mergeFacets(state.allOrbitFacets,        facetData.orbit_types         || []);
     state.allCitationFacets     = _mergeFacets(state.allCitationFacets,     facetData.citation_categories || []);
+    state.allPersonRoleFacets   = _mergeFacets(state.allPersonRoleFacets,   facetData.person_roles         || []);
+    state.allGenderFacets       = _mergeFacets(state.allGenderFacets,       facetData.genders              || []);
     state.allDiscovererFacets   = _mergeFacets(state.allDiscovererFacets,   facetData.discoverers          || []);
     state.allObservatoryFacets  = _mergeFacets(state.allObservatoryFacets,  facetData.observatories        || []);
     state.allFlagFacets         = _mergeFacets(state.allFlagFacets,         facetData.flags               || []);
@@ -387,6 +410,8 @@ function currentParams() {
   params.set("q_target", state.queryTarget);
   state.orbits.forEach((v)            => params.append("orbit", v));
   state.citationCategories.forEach((v)=> params.append("citation_category", v));
+  state.personRoles.forEach((v)        => params.append("person_role", v));
+  state.genders.forEach((v)            => params.append("gender", v));
   state.discoverers.forEach((v)       => params.append("discoverer", v));
   state.observatories.forEach((v)     => params.append("observatory", v));
   state.flags.forEach((v)             => params.append("flag", v));
@@ -447,6 +472,10 @@ function renderSearchBadges(item) {
   (item.citation_categories || []).forEach((c) =>
     b.push(`<span class="badge citation">${escapeHtml(c)}</span>`)
   );
+  (item.person_roles || []).forEach((role) =>
+    b.push(`<span class="badge citation">${escapeHtml(role)}</span>`)
+  );
+  if (item.gender) b.push(`<span class="badge citation">${escapeHtml(item.gender)}</span>`);
   if (item.is_neo) b.push(`<span class="badge flag">NEO</span>`);
   if (item.is_pha) b.push(`<span class="badge pha">PHA</span>`);
   return b.join("");
@@ -527,6 +556,8 @@ function renderActiveFilterTags() {
 function renderFacets() {
   renderCheckboxGroup(els.orbitFilters,       state.allOrbitFacets,       state.orbits,             "orbits");
   renderCheckboxGroup(els.citationFilters,    state.allCitationFacets,    state.citationCategories, "citationCategories");
+  renderCheckboxGroup(els.personRoleFilters,  state.allPersonRoleFacets,  state.personRoles,        "personRoles");
+  renderCheckboxGroup(els.genderFilters,      state.allGenderFacets,      state.genders,            "genders");
   renderCheckboxGroup(els.discovererFilters,  state.allDiscovererFacets,  state.discoverers,        "discoverers");
   renderCheckboxGroup(els.observatoryFilters, state.allObservatoryFacets, state.observatories,      "observatories");
   renderCheckboxGroup(els.flagFilters,        state.allFlagFacets,        state.flags,              "flags");
@@ -645,6 +676,35 @@ function renderWordCloud(words) {
   });
 }
 
+const GENDER_ORDER = ["Female", "Male", "Multiple/Mixed", "Unknown", "Non-person"];
+
+function renderGenderStats(facets) {
+  const counts = new Map(facets.map((facet) => [facet.value, facet.count]));
+  const ordered = [
+    ...GENDER_ORDER.filter((value) => counts.has(value)),
+    ...facets.map((facet) => facet.value).filter((value) => !GENDER_ORDER.includes(value)),
+  ].map((value) => ({ value, count: counts.get(value) || 0 })).filter((item) => item.count > 0);
+  const total = ordered.reduce((sum, item) => sum + item.count, 0);
+
+  els.genderStats.hidden = total === 0;
+  if (!total) return;
+
+  els.genderStatsTotal.textContent = `${formatNumber(total)}件`;
+  els.genderStatsBar.innerHTML = ordered.map((item) => {
+    const percentage = (item.count / total) * 100;
+    const label = `${item.value}: ${formatNumber(item.count)} (${percentage.toFixed(1)}%)`;
+    return `<span class="gender-segment gender-segment--${slug(item.value)}" style="width:${percentage}%" title="${escapeHtml(label)}"></span>`;
+  }).join("");
+  els.genderStatsBar.setAttribute("aria-label", `${i18next.t("side.gender_stats")}: ${ordered.map((item) => `${item.value} ${formatNumber(item.count)}`).join(", ")}`);
+  els.genderStatsLegend.innerHTML = ordered.map((item) => `
+    <span class="gender-legend-item">
+      <i class="gender-legend-swatch gender-segment--${slug(item.value)}"></i>
+      <span>${escapeHtml(item.value)}</span>
+      <strong>${formatNumber(item.count)}</strong>
+    </span>
+  `).join("");
+}
+
 /* ============================================================
    RENDER: DETAIL
    ============================================================ */
@@ -656,13 +716,18 @@ async function loadDetail(permid) {
   if (active) active.classList.add("active");
 
   const catBadges = (detail.categories || []).map(renderDetailBadge).join("");
+  const facetBadges = (detail.citation_facets || []).map(renderDetailFacetBadge).join("");
+  const roleFacets = (detail.citation_facets || []).filter((facet) => facet.kind === "person_role");
+  const genderFacet = (detail.citation_facets || []).find((facet) => facet.kind === "gender");
+  const publicationSection = renderPublicationSection(detail);
+  const personFacetSection = renderPersonFacetSection(roleFacets, genderFacet);
 
   els.detailBody.innerHTML = `
     <div class="row-title">
       <strong>${escapeHtml(detail.name_display || detail.name_ascii)}</strong>
       <span class="meta">${escapeHtml(detail.iau_designation || `(${detail.permid})`)}</span>
     </div>
-    <div class="badges" style="margin-bottom:8px">${catBadges || `<span class="badge">Uncategorized</span>`}</div>
+    <div class="badges" style="margin-bottom:8px">${catBadges || `<span class="badge">Uncategorized</span>`}${facetBadges}</div>
     <div class="detail-grid">
       <div><span>Semimajor axis</span>${formatValue(detail.semimajor_axis, " AU")}</div>
       <div><span>Eccentricity</span>${formatValue(detail.eccentricity)}</div>
@@ -672,6 +737,8 @@ async function loadDetail(permid) {
       <div><span>Observatory</span>${formatValue(detail.discovery_site)}</div>
     </div>
     <p class="discovery-line">${escapeHtml(detail.discoverer_text ? `Discoverer: ${detail.discoverer_text}` : "Discoverer: unknown")}</p>
+    ${publicationSection}
+    ${personFacetSection}
     <div class="ext-links">
       <a class="ext-link ext-link--mpc" href="https://www.minorplanetcenter.net/db_search/show_object?object_id=${encodeURIComponent(detail.permid)}" target="_blank" rel="noopener noreferrer">
         MPC &rarr;
@@ -691,11 +758,59 @@ async function loadDetail(permid) {
   }
 }
 
+function renderPublicationSection(detail) {
+  const hasPublication = detail.naming_published_date || detail.naming_reference || detail.naming_source_url;
+  if (!hasPublication) return "";
+  const source = detail.naming_source_url
+    ? `<a href="${escapeHtml(detail.naming_source_url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(detail.naming_source || i18next.t("detail.source"))} ↗</a>`
+    : escapeHtml(detail.naming_source || "—");
+  return `
+    <section class="detail-section">
+      <h3>${i18next.t("detail.naming_publication")}</h3>
+      <dl class="detail-facts">
+        <div><dt>${i18next.t("detail.publication_date")}</dt><dd>${escapeHtml(detail.naming_published_date || "—")}</dd></div>
+        <div><dt>${i18next.t("detail.reference")}</dt><dd>${escapeHtml(detail.naming_reference || "—")}</dd></div>
+        <div><dt>${i18next.t("detail.source")}</dt><dd>${source}</dd></div>
+      </dl>
+    </section>
+  `;
+}
+
+function renderPersonFacetSection(roleFacets, genderFacet) {
+  if (!roleFacets.length && !genderFacet) return "";
+  const values = [
+    ...roleFacets.map((facet) => ({ label: i18next.t("detail.roles"), facet })),
+    ...(genderFacet ? [{ label: i18next.t("detail.gender"), facet: genderFacet }] : []),
+  ];
+  return `
+    <section class="detail-section">
+      <h3>${i18next.t("detail.person_facets")}</h3>
+      <div class="detail-facet-list">
+        ${values.map(({ label, facet }) => `
+          <div class="detail-facet-row">
+            <span class="detail-facet-label">${escapeHtml(label)}</span>
+            <span class="badge citation">${escapeHtml(facet.value)}</span>
+            ${facet.evidence_text ? `<p>${i18next.t("detail.evidence")}: ${escapeHtml(facet.evidence_text)}</p>` : ""}
+          </div>
+        `).join("")}
+      </div>
+    </section>
+  `;
+}
+
 function renderDetailBadge(category) {
   if (category.kind === "orbit")    return `<span class="badge orbit">Orbit: ${escapeHtml(category.value)}</span>`;
   if (category.kind === "citation") return `<span class="badge citation">${escapeHtml(category.value)}</span>`;
   if (category.kind === "flag")     return `<span class="badge ${category.value === "PHA" ? "pha" : "flag"}">${escapeHtml(category.value)}</span>`;
   return `<span class="badge">${escapeHtml(category.value)}</span>`;
+}
+
+function renderDetailFacetBadge(facet) {
+  const prefix = facet.kind === "person_role" ? "Role" : "Gender";
+  const title = [facet.evidence_text, facet.source, facet.confidence != null ? `confidence ${facet.confidence}` : ""]
+    .filter(Boolean)
+    .join(" · ");
+  return `<span class="badge citation"${title ? ` title="${escapeHtml(title)}"` : ""}>${prefix}: ${escapeHtml(facet.value)}</span>`;
 }
 
 /* ============================================================
