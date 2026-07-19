@@ -150,6 +150,37 @@ def initialize(connection: sqlite3.Connection) -> None:
         CREATE INDEX IF NOT EXISTS citation_facets_kind_value
         ON citation_facets(kind, value, permid);
 
+        CREATE TABLE IF NOT EXISTS classification_jobs (
+            job_id TEXT PRIMARY KEY,
+            command TEXT NOT NULL,
+            started_at TEXT NOT NULL,
+            finished_at TEXT,
+            status TEXT NOT NULL,
+            classifier_mode TEXT NOT NULL,
+            ollama_model TEXT,
+            ollama_host TEXT NOT NULL,
+            ollama_timeout REAL NOT NULL,
+            ollama_think INTEGER NOT NULL,
+            ollama_think_on_review INTEGER NOT NULL,
+            code_commit TEXT,
+            worktree_dirty INTEGER NOT NULL,
+            prompts_json TEXT NOT NULL,
+            prompt_sha256 TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS classification_assignments (
+            permid TEXT NOT NULL,
+            target TEXT NOT NULL,
+            job_id TEXT NOT NULL,
+            assigned_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (permid, target),
+            FOREIGN KEY (permid) REFERENCES minor_planets(permid) ON DELETE CASCADE,
+            FOREIGN KEY (job_id) REFERENCES classification_jobs(job_id) ON DELETE RESTRICT
+        );
+
+        CREATE INDEX IF NOT EXISTS classification_assignments_job
+        ON classification_assignments(job_id);
+
         CREATE TABLE IF NOT EXISTS discovery_facets (
             permid TEXT NOT NULL,
             kind TEXT NOT NULL,
@@ -263,6 +294,8 @@ def initialize(connection: sqlite3.Connection) -> None:
 
 def reset_database(connection: sqlite3.Connection) -> None:
     """Remove all locally stored ingest data."""
+    connection.execute("DELETE FROM classification_assignments")
+    connection.execute("DELETE FROM classification_jobs")
     connection.execute("DELETE FROM minor_planets")
     connection.execute("DELETE FROM discovery_facets")
     connection.execute("DELETE FROM citation_facets")
@@ -649,6 +682,42 @@ def replace_citation_facets(
             (permid, facet.kind, facet.value, facet.evidence_text, facet.source, facet.confidence)
             for facet in facets
         ],
+    )
+
+
+def create_classification_job(connection: sqlite3.Connection, job: dict[str, Any]) -> None:
+    connection.execute(
+        """
+        INSERT INTO classification_jobs (
+            job_id, command, started_at, status, classifier_mode, ollama_model,
+            ollama_host, ollama_timeout, ollama_think, ollama_think_on_review,
+            code_commit, worktree_dirty, prompts_json, prompt_sha256
+        ) VALUES (?, ?, ?, 'running', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            job["job_id"], job["command"], job["started_at"], job["classifier_mode"],
+            job["ollama_model"], job["ollama_host"], job["ollama_timeout"],
+            int(job["ollama_think"]), int(job["ollama_think_on_review"]), job["code_commit"],
+            int(job["worktree_dirty"]), job["prompts_json"], job["prompt_sha256"],
+        ),
+    )
+
+
+def assign_classification_job(connection: sqlite3.Connection, permid: str, target: str, job_id: str) -> None:
+    connection.execute(
+        """
+        INSERT INTO classification_assignments (permid, target, job_id, assigned_at)
+        VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+        ON CONFLICT(permid, target) DO UPDATE SET job_id = excluded.job_id, assigned_at = CURRENT_TIMESTAMP
+        """,
+        (permid, target, job_id),
+    )
+
+
+def finish_classification_job(connection: sqlite3.Connection, job_id: str, status: str) -> None:
+    connection.execute(
+        "UPDATE classification_jobs SET status = ?, finished_at = CURRENT_TIMESTAMP WHERE job_id = ?",
+        (status, job_id),
     )
 
 

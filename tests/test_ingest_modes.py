@@ -187,6 +187,30 @@ class IngestModeTests(unittest.TestCase):
         self.assertEqual(self._citation_categories("1"), ["Artifact/Concept"])
         self.assertEqual(self._citation_categories("2"), ["Place"])
 
+    def test_reclassify_records_one_job_for_categories_and_person_facets(self):
+        self._upsert("1", identifier=_identifier("1", "Ada", "Ada Example was a female astronomer."))
+
+        result = reclassify_existing(self.db_path, classifier_mode="rules")
+
+        connection = db.connect(self.db_path)
+        job = connection.execute(
+            "SELECT status, classifier_mode, prompts_json FROM classification_jobs WHERE job_id = ?",
+            (result["job_id"],),
+        ).fetchone()
+        assignments = connection.execute(
+            "SELECT target, job_id FROM classification_assignments WHERE permid = '1' ORDER BY target"
+        ).fetchall()
+        connection.close()
+
+        self.assertEqual(job["status"], "completed")
+        self.assertEqual(job["classifier_mode"], "rules")
+        self.assertIn("citation_category", job["prompts_json"])
+        self.assertIn("person_facet", job["prompts_json"])
+        self.assertEqual([(row["target"], row["job_id"]) for row in assignments], [
+            ("citation_category", result["job_id"]),
+            ("person_facet", result["job_id"]),
+        ])
+
     def test_reclassify_filter_accepts_no_citation_alias(self):
         result = reclassify_existing(
             self.db_path,

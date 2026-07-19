@@ -192,7 +192,10 @@ def main(argv: list[str] | None = None) -> int:
             if result.get("category_filter")
             else ""
         )
-        print(f"Reclassified {result['records']} records{filter_text} using {result['classifier']}.")
+        print(
+            f"Reclassified {result['records']} records{filter_text} using {result['classifier']}; "
+            f"job={result['job_id']}."
+        )
         return 0
 
     if args.command == "classify-person-facets":
@@ -208,7 +211,7 @@ def main(argv: list[str] | None = None) -> int:
         )
         print(
             f"Person facets: {result['updated']} updated, {result['unchanged']} unchanged "
-            f"of {result['records']} records; classifier={result['classifier']}."
+            f"of {result['records']} records; classifier={result['classifier']}; job={result['job_id']}."
         )
         return 0
 

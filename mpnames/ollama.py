@@ -111,7 +111,31 @@ def extract_person_facets(
     selected_model = model or (list_models(host=selected_host)[:1] or [None])[0]
     if not selected_model:
         raise RuntimeError("No ollama model is available")
-    prompt = f'''You extract narrowly defined metadata from a minor-planet naming citation.
+    prompt = _build_person_facet_prompt(citation_text)
+    payload = json.dumps(
+        {
+            "model": selected_model,
+            "prompt": prompt,
+            "stream": False,
+            "format": "json",
+            "think": think,
+            "options": {"temperature": 0, "num_predict": 500 if think else 250},
+        }
+    ).encode("utf-8")
+    request = urllib.request.Request(
+        f"{selected_host.rstrip('/')}/api/generate",
+        data=payload,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        body = json.loads(response.read().decode("utf-8"))
+    parsed = _parse_json_value(str(body.get("response", "")).strip())
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _build_person_facet_prompt(citation_text: str) -> str:
+    return f'''You extract narrowly defined metadata from a minor-planet naming citation.
 
 Return ONLY valid JSON in this exact shape:
 {{"roles":[{{"value":"Scientist","evidence":"exact quotation"}}],"gender":{{"value":"Female","evidence":"exact quotation"}}}}
@@ -135,26 +159,21 @@ Rules:
 Citation:
 {citation_text}
 '''
-    payload = json.dumps(
-        {
-            "model": selected_model,
-            "prompt": prompt,
-            "stream": False,
-            "format": "json",
-            "think": think,
-            "options": {"temperature": 0, "num_predict": 500 if think else 250},
-        }
-    ).encode("utf-8")
-    request = urllib.request.Request(
-        f"{selected_host.rstrip('/')}/api/generate",
-        data=payload,
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
-    with urllib.request.urlopen(request, timeout=timeout) as response:
-        body = json.loads(response.read().decode("utf-8"))
-    parsed = _parse_json_value(str(body.get("response", "")).strip())
-    return parsed if isinstance(parsed, dict) else {}
+
+
+def citation_prompt_templates() -> dict[str, str]:
+    """Return every citation-classification prompt variant without citation data."""
+    marker = "{{CITATION_TEXT}}"
+    return {
+        "initial": _build_prompt(marker, review=False, force_single=False, think=False),
+        "review": _build_prompt(marker, review=True, force_single=False, think=True),
+        "force_single": _build_prompt(marker, review=True, force_single=True, think=True),
+    }
+
+
+def person_facet_prompt_template() -> str:
+    """Return the reusable person-facet prompt template without citation data."""
+    return _build_person_facet_prompt("{{CITATION_TEXT}}")
 
 
 def _classify_once(

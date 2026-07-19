@@ -110,7 +110,9 @@ Citation categories can be assigned with one of three classifiers:
 - `auto`: use ollama when its HTTP API is available; otherwise fall back to rules.
 - `ollama`: use ollama as the primary classifier, with rule fallback if the call fails or returns invalid labels.
 
-To reclassify an existing database without downloading MPC data again:
+To reclassify an existing database without downloading MPC data again. This also
+updates person roles and entity-gender facets using the resulting citation
+category in the same classification job:
 
 ```powershell
 python -m mpnames reclassify --classifier ollama
@@ -134,6 +136,11 @@ fictional entities may receive an explicit gender facet while retaining their
 primary `Mythology` or `Character` category. Use `--classifier ollama` with a
 specific `--ollama-model` for evidence-quoting local-LLM review; the default
 rules classifier is the conservative full-dataset baseline.
+
+Every classification command creates a job record in SQLite. It stores the
+command settings, model, complete prompt templates, Git revision,
+dirty-worktree flag, and timestamps once per run; each classified object keeps
+only the latest job reference for its citation category and person facets.
 
 You can pin a specific local model:
 

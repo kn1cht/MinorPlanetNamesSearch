@@ -19,6 +19,7 @@ from .mpcorb import OrbitRecord, parse_mpcorb_lines, parse_orbits_api_response
 from .mpnames_parser import NameRecord, parse_mpnames_html
 from .numbered_mps import DiscoveryRecord, parse_numbered_mps
 from .person_facets import PersonFacetClassifier
+from .provenance import new_classification_job
 from .progress import ProgressReporter, QUIET_PROGRESS
 from .settings import (
     IDENTIFIER_BATCH_SIZE,
@@ -90,6 +91,8 @@ def ingest(
         else {}
     )
     classifier = CitationClassifier(mode=classifier_mode, model=ollama_model, host=ollama_host)
+    facet_classifier = PersonFacetClassifier(mode=classifier_mode, model=ollama_model, host=ollama_host)
+    job: dict[str, Any] | None = None
     orbits: dict[str, OrbitRecord] = {}
     stats = {
         "mode": mode,
@@ -104,6 +107,17 @@ def ingest(
     next_write_index = 0
     reset_done = False
 
+    def ensure_job() -> dict[str, Any]:
+        nonlocal job
+        if job is None:
+            job = new_classification_job(
+                command="ingest", classifier_mode=classifier_mode, ollama_model=ollama_model,
+                ollama_host=ollama_host, ollama_timeout=60.0, ollama_think=False,
+                include_categories=True, include_person_facets=True,
+            )
+            db.create_classification_job(connection, job)
+        return job
+
     def write_ready_records(upto_index: int, current_orbits: dict[str, OrbitRecord] | None = None) -> None:
         nonlocal next_write_index, reset_done
         upto_index = min(max(upto_index, next_write_index), len(selected_names))
@@ -113,6 +127,7 @@ def ingest(
         if mode == "reset" and not reset_done:
             db.reset_database(connection)
             reset_done = True
+        current_job = ensure_job()
         for zero_based_index in range(next_write_index, upto_index):
             record = selected_names[zero_based_index]
             identifier = (
@@ -125,6 +140,9 @@ def ingest(
             orbit = _orbit_for(permid, identifier, orbit_lookup)
             discovery = discoveries.get(record.permid) or discoveries.get(permid)
             citation_categories = classifier.classify(db.html_to_text(identifier.get("citation")))
+            citation_facets = facet_classifier.classify(
+                db.html_to_text(identifier.get("citation")), [category.value for category in citation_categories]
+            )
             status = db.upsert_minor_planet(
                 connection,
                 permid=record.permid,
@@ -134,7 +152,10 @@ def ingest(
                 orbit=orbit,
                 discovery=discovery,
                 citation_categories=citation_categories,
+                citation_facets=citation_facets,
             )
+            db.assign_classification_job(connection, record.permid, "citation_category", current_job["job_id"])
+            db.assign_classification_job(connection, record.permid, "person_facet", current_job["job_id"])
             stats[status] += 1
             current = zero_based_index + 1
             if _should_report_item(current, len(selected_names)):
@@ -169,6 +190,8 @@ def ingest(
         db.reset_database(connection)
         reset_done = True
     write_ready_records(len(selected_names))
+    if job is not None:
+        db.finish_classification_job(connection, job["job_id"], "completed")
     connection.commit()
     connection.close()
     progress.message("Ingest complete")
@@ -190,11 +213,21 @@ def init_sample(
     identifiers = json.loads((fixture_dir / "identifier_sample.json").read_text(encoding="utf-8"))
     orbits = parse_mpcorb_lines((fixture_dir / "mpcorb_sample.dat").read_text(encoding="utf-8").splitlines())
     classifier = CitationClassifier(mode=classifier_mode, model=ollama_model, host=ollama_host)
+    facet_classifier = PersonFacetClassifier(mode=classifier_mode, model=ollama_model, host=ollama_host)
+    job = new_classification_job(
+        command="init-sample", classifier_mode=classifier_mode, ollama_model=ollama_model,
+        ollama_host=ollama_host, ollama_timeout=60.0, ollama_think=False,
+        include_categories=True, include_person_facets=True,
+    )
+    db.create_classification_job(connection, job)
 
     for record in names:
         identifier = identifiers.get(record.permid) or identifiers.get(record.name_ascii) or {}
         permid = str(identifier.get("permid") or record.permid)
         citation_categories = classifier.classify(db.html_to_text(identifier.get("citation")))
+        citation_facets = facet_classifier.classify(
+            db.html_to_text(identifier.get("citation")), [category.value for category in citation_categories]
+        )
         db.upsert_minor_planet(
             connection,
             permid=record.permid,
@@ -204,7 +237,11 @@ def init_sample(
             orbit=_orbit_for(permid, identifier, orbits),
             discovery=None,
             citation_categories=citation_categories,
+            citation_facets=citation_facets,
         )
+        db.assign_classification_job(connection, record.permid, "citation_category", job["job_id"])
+        db.assign_classification_job(connection, record.permid, "person_facet", job["job_id"])
+    db.finish_classification_job(connection, job["job_id"], "completed")
     connection.commit()
     connection.close()
     return {"records": len(names), "fixture_dir": str(fixture_dir)}
@@ -229,6 +266,16 @@ def reclassify_existing(
         mode=classifier_mode, model=ollama_model, host=ollama_host,
         timeout=ollama_timeout, think=ollama_think, think_on_review=ollama_think_on_review,
     )
+    facet_classifier = PersonFacetClassifier(
+        mode=classifier_mode, model=ollama_model, host=ollama_host,
+        timeout=ollama_timeout, think=ollama_think,
+    )
+    job = new_classification_job(
+        command="reclassify", classifier_mode=classifier_mode, ollama_model=ollama_model,
+        ollama_host=ollama_host, ollama_timeout=ollama_timeout, ollama_think=ollama_think,
+        ollama_think_on_review=ollama_think_on_review, include_categories=True, include_person_facets=True,
+    )
+    db.create_classification_job(connection, job)
     category_filter = _normalize_category_filters(categories or [])
     sql = "SELECT DISTINCT mp.permid, mp.citation_text, mp.name_ascii FROM minor_planets mp"
     params: list[Any] = []
@@ -249,36 +296,47 @@ def reclassify_existing(
 
     filter_detail = f" categories={','.join(category_filter)}" if category_filter else ""
     progress.message(f"Reclassifying {len(rows)} existing records with classifier={classifier_mode}{filter_detail}")
-    for index, row in enumerate(rows, start=1):
-        old_rows = connection.execute("SELECT value FROM categories WHERE permid = ? AND kind = 'citation'", (row["permid"],)).fetchall()
-        old_cats = {r["value"] for r in old_rows}
+    try:
+        for index, row in enumerate(rows, start=1):
+            old_rows = connection.execute("SELECT value FROM categories WHERE permid = ? AND kind = 'citation'", (row["permid"],)).fetchall()
+            old_cats = {r["value"] for r in old_rows}
 
-        categories = classifier.classify(row["citation_text"])
-        new_cats = {c.value for c in categories}
+            citation_categories = classifier.classify(row["citation_text"])
+            new_cats = {c.value for c in citation_categories}
 
-        if old_cats != new_cats:
-            if log_fp is None:
-                log_fp = open(log_file, "w", encoding="utf-8")
-            log_fp.write(f"Name: {row['name_ascii']} ({row['permid']})\n")
-            log_fp.write(f"Old Categories: {', '.join(sorted(old_cats)) if old_cats else 'None'}\n")
-            log_fp.write(f"New Categories: {', '.join(sorted(new_cats)) if new_cats else 'None'}\n")
-            log_fp.write(f"Citation: {row['citation_text']}\n")
-            log_fp.write("-" * 80 + "\n")
-            changed += 1
+            if old_cats != new_cats:
+                if log_fp is None:
+                    log_fp = open(log_file, "w", encoding="utf-8")
+                log_fp.write(f"Name: {row['name_ascii']} ({row['permid']})\n")
+                log_fp.write(f"Old Categories: {', '.join(sorted(old_cats)) if old_cats else 'None'}\n")
+                log_fp.write(f"New Categories: {', '.join(sorted(new_cats)) if new_cats else 'None'}\n")
+                log_fp.write(f"Citation: {row['citation_text']}\n")
+                log_fp.write("-" * 80 + "\n")
+                changed += 1
 
-        db.replace_citation_categories(connection, row["permid"], categories)
-        updated += 1
-        if _should_report_item(index, len(rows)):
-            progress.step("Reclassify", index, len(rows))
-            
-    if log_fp is not None:
-        log_fp.close()
-        progress.message(f"Logged {changed} category changes to {log_file}")
-    
-    connection.commit()
-    connection.close()
+            db.replace_citation_categories(connection, row["permid"], citation_categories)
+            facets = facet_classifier.classify(row["citation_text"], [category.value for category in citation_categories])
+            db.replace_citation_facets(connection, row["permid"], facets)
+            db.assign_classification_job(connection, row["permid"], "citation_category", job["job_id"])
+            db.assign_classification_job(connection, row["permid"], "person_facet", job["job_id"])
+            updated += 1
+            if index % 100 == 0:
+                connection.commit()
+            if _should_report_item(index, len(rows)):
+                progress.step("Reclassify", index, len(rows))
+        db.finish_classification_job(connection, job["job_id"], "completed")
+    except Exception:
+        db.finish_classification_job(connection, job["job_id"], "failed")
+        connection.commit()
+        raise
+    finally:
+        if log_fp is not None:
+            log_fp.close()
+            progress.message(f"Logged {changed} category changes to {log_file}")
+        connection.commit()
+        connection.close()
     progress.message(f"Reclassification complete ({changed} changes out of {updated} processed)")
-    return {"records": updated, "changed": changed, "classifier": classifier_mode, "category_filter": category_filter, "log_file": str(log_file) if log_fp else None}
+    return {"records": updated, "changed": changed, "classifier": classifier_mode, "category_filter": category_filter, "log_file": str(log_file) if log_fp else None, "job_id": job["job_id"]}
 
 
 def classify_person_facets_existing(
@@ -302,6 +360,12 @@ def classify_person_facets_existing(
         timeout=ollama_timeout,
         think=ollama_think,
     )
+    job = new_classification_job(
+        command="classify-person-facets", classifier_mode=classifier_mode, ollama_model=ollama_model,
+        ollama_host=ollama_host, ollama_timeout=ollama_timeout, ollama_think=ollama_think,
+        include_categories=False, include_person_facets=True,
+    )
+    db.create_classification_job(connection, job)
     sql = """
         SELECT mp.permid, mp.citation_text, GROUP_CONCAT(c.value, CHAR(31)) AS citation_values
         FROM minor_planets AS mp
@@ -317,20 +381,29 @@ def classify_person_facets_existing(
 
     updated = unchanged = 0
     progress.message(f"Classifying person facets for {len(rows)} records with classifier={classifier_mode}")
-    for index, row in enumerate(rows, start=1):
-        categories = str(row["citation_values"] or "").split(chr(31))
-        facets = classifier.classify(row["citation_text"], categories)
-        if db._citation_facets_match(connection, row["permid"], facets):
-            unchanged += 1
-        else:
-            db.replace_citation_facets(connection, row["permid"], facets)
-            updated += 1
-        if _should_report_item(index, len(rows)):
-            progress.step("Person facet classify", index, len(rows), detail=f"updated={updated}")
-
-    connection.commit()
-    connection.close()
-    return {"records": len(rows), "updated": updated, "unchanged": unchanged, "classifier": classifier_mode}
+    try:
+        for index, row in enumerate(rows, start=1):
+            categories = str(row["citation_values"] or "").split(chr(31))
+            facets = classifier.classify(row["citation_text"], categories)
+            if db._citation_facets_match(connection, row["permid"], facets):
+                unchanged += 1
+            else:
+                db.replace_citation_facets(connection, row["permid"], facets)
+                updated += 1
+            db.assign_classification_job(connection, row["permid"], "person_facet", job["job_id"])
+            if index % 100 == 0:
+                connection.commit()
+            if _should_report_item(index, len(rows)):
+                progress.step("Person facet classify", index, len(rows), detail=f"updated={updated}")
+        db.finish_classification_job(connection, job["job_id"], "completed")
+    except Exception:
+        db.finish_classification_job(connection, job["job_id"], "failed")
+        connection.commit()
+        raise
+    finally:
+        connection.commit()
+        connection.close()
+    return {"records": len(rows), "updated": updated, "unchanged": unchanged, "classifier": classifier_mode, "job_id": job["job_id"]}
 
 
 def enrich_discovery_existing(
@@ -487,6 +560,16 @@ def backfill_wgsbn_only(
         think=ollama_think,
         think_on_review=ollama_think_on_review,
     )
+    facet_classifier = PersonFacetClassifier(
+        mode=classifier_mode, model=ollama_model, host=ollama_host,
+        timeout=ollama_timeout, think=ollama_think,
+    )
+    job = new_classification_job(
+        command="backfill-wgsbn-only", classifier_mode=classifier_mode, ollama_model=ollama_model,
+        ollama_host=ollama_host, ollama_timeout=ollama_timeout, ollama_think=ollama_think,
+        ollama_think_on_review=ollama_think_on_review, include_categories=True, include_person_facets=True,
+    )
+    db.create_classification_job(connection, job)
     inserted = updated = unchanged = missing = 0
     for index, permid in enumerate(normalized_permids, start=1):
         publication = connection.execute(
@@ -505,6 +588,7 @@ def backfill_wgsbn_only(
 
         citation_text = publication["citation_text"]
         categories = classifier.classify(citation_text)
+        facets = facet_classifier.classify(citation_text, [category.value for category in categories])
         status = db.upsert_minor_planet(
             connection,
             permid=permid,
@@ -516,7 +600,10 @@ def backfill_wgsbn_only(
                 "citation": citation_text,
             },
             citation_categories=categories,
+            citation_facets=facets,
         )
+        db.assign_classification_job(connection, permid, "citation_category", job["job_id"])
+        db.assign_classification_job(connection, permid, "person_facet", job["job_id"])
         connection.execute(
             """
             UPDATE minor_planets
@@ -539,6 +626,7 @@ def backfill_wgsbn_only(
             unchanged += 1
         progress.step("WGSBN-only backfill", index, len(normalized_permids), detail=permid)
 
+    db.finish_classification_job(connection, job["job_id"], "completed")
     connection.commit()
     connection.close()
     return {
@@ -548,6 +636,7 @@ def backfill_wgsbn_only(
         "unchanged": unchanged,
         "missing": missing,
         "classifier": classifier_mode,
+        "job_id": job["job_id"],
     }
 
 
