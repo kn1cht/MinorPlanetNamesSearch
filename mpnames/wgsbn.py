@@ -10,6 +10,12 @@ from typing import Any
 from urllib.parse import urljoin, urlparse
 
 
+# These names remain in historical WGSBN JSON files but were explicitly
+# withdrawn in later Bulletin errata.  Two names were subsequently assigned to
+# different minor planets; the withdrawn number/name pair must not be restored.
+WITHDRAWN_NAMING_PERMIDS = frozenset({"579513", "511955", "618348", "59880"})
+
+
 @dataclass(frozen=True)
 class WgsbnBulletin:
     volume: int
@@ -68,7 +74,7 @@ def parse_wgsbn_namings(body: str) -> list[WgsbnNaming]:
             continue
         permid = str(item.get("mp_number") or "").strip()
         name = str(item.get("name") or "").strip()
-        if not permid.isdigit() or not name:
+        if not permid.isdigit() or not name or permid in WITHDRAWN_NAMING_PERMIDS:
             continue
         citation = item.get("citation")
         reference = item.get("reference")

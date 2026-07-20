@@ -35,6 +35,14 @@ class WgsbnParserTests(unittest.TestCase):
 
         self.assertEqual(namings, [WgsbnNaming("5627", "Short", "A citation", "WGSBN Bull. 2, #1, 5")])
 
+    def test_naming_parser_excludes_later_withdrawn_names(self):
+        namings = parse_wgsbn_namings(
+            '[{"mp_number": "511955", "name": "Katalinkarikó"}, '
+            '{"mp_number": "5627", "name": "Short"}]'
+        )
+
+        self.assertEqual(namings, [WgsbnNaming("5627", "Short", None, None)])
+
     def test_volume_determines_the_publication_year(self):
         self.assertEqual(wgsbn_volume_year(1), 2021)
         self.assertEqual(wgsbn_volume_year(2), 2022)
@@ -117,6 +125,27 @@ class WgsbnDatabaseTests(unittest.TestCase):
 
         self.assertEqual(stored, 1)
         self.assertEqual(tuple(row), ("Original", "WGSBN Bull. 2, #1, 5"))
+
+    def test_purge_withdrawn_wgsbn_namings_removes_objects_and_publications(self):
+        db.upsert_minor_planet(
+            self.connection,
+            permid="511955",
+            name_ascii="Katalinkariko",
+            name_display="Katalinkarikó",
+            identifier={"permid": "511955", "citation": "Withdrawn citation."},
+        )
+        self.connection.execute(
+            """
+            INSERT INTO naming_publications(permid, source_url, published_date, published_year, name)
+            VALUES ('511955', 'https://example.test/v2-5.json', '2022-04-11', 2022, 'Katalinkarikó')
+            """
+        )
+
+        result = db.purge_withdrawn_wgsbn_namings(self.connection)
+
+        self.assertEqual(result, {"minor_planets": 1, "naming_publications": 1})
+        self.assertIsNone(self.connection.execute("SELECT 1 FROM minor_planets WHERE permid = '511955'").fetchone())
+        self.assertIsNone(self.connection.execute("SELECT 1 FROM naming_publications WHERE permid = '511955'").fetchone())
 
     def test_backfill_adds_an_explicit_wgsbn_only_record_with_metadata(self):
         source_url = "https://www.wgsbn-iau.org/files/json/V002/WGSBNBull_V002_001.json"

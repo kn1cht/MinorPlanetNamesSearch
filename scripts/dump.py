@@ -43,6 +43,24 @@ def dump_sorted(db_path, out_path):
     insert_lines.sort(key=prio)
 
     with open(out_path, 'w', encoding='utf-8') as f:
+        # A D1 import is a full snapshot replacement.  Drop only tables owned by
+        # this application; do not touch Cloudflare-managed tables such as _cf_KV.
+        # The FTS virtual table must be dropped before its content table, and
+        # foreign keys are disabled while the interdependent tables are replaced.
+        f.write('''
+PRAGMA foreign_keys = OFF;
+DROP TABLE IF EXISTS minor_planets_fts;
+DROP TABLE IF EXISTS classification_assignments;
+DROP TABLE IF EXISTS classification_jobs;
+DROP TABLE IF EXISTS citation_facets;
+DROP TABLE IF EXISTS discovery_facets;
+DROP TABLE IF EXISTS categories;
+DROP TABLE IF EXISTS naming_publications;
+DROP TABLE IF EXISTS wgsbn_bulletins;
+DROP TABLE IF EXISTS identifier_cache;
+DROP TABLE IF EXISTS ingest_runs;
+DROP TABLE IF EXISTS minor_planets;
+''')
         for l in schema_lines: f.write(l + '\n')
         for l in insert_lines: f.write(l + '\n')
         for l in trigger_lines: f.write(l + '\n')

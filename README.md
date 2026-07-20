@@ -47,7 +47,8 @@ to fill missing fields in existing records.
 
 Every `ingest` run downloads the official WGSBN JSON archive index, fetches only
 new Bulletin JSON files, and joins their records to the local database by
-permanent minor-planet number. It derives the publication
+permanent minor-planet number. Names explicitly withdrawn in a later WGSBN
+Bulletin erratum are excluded. It derives the publication
 year mechanically from the Bulletin volume (Volume 1 is 2021), rather than using
 the JSON archive's file-date label. It records the earliest publication year,
 reference, and source URL. WGSBN Bulletin coverage begins in 2021; earlier names
@@ -55,11 +56,17 @@ require a separate MPC Circulars backfill. Use `ingest --mode repair` to retry
 this synchronization after a failed or interrupted ingest.
 
 If a named object remains absent from both the MPC name list and Identifier API,
-it can be explicitly retained from its WGSBN Bulletin record (rather than
-automatically promoting every transient MPC lag):
+it can be explicitly retained from a non-withdrawn WGSBN Bulletin record (rather
+than automatically promoting every transient MPC lag):
 
 ```powershell
-python -m mpnames backfill-wgsbn-only --permid 579513 --permid 511955 --permid 618348 --permid 59880
+python -m mpnames backfill-wgsbn-only --permid <permanent-number>
+```
+
+To apply known WGSBN withdrawal errata to an existing database:
+
+```powershell
+python -m mpnames purge-withdrawn-wgsbn
 ```
 
 For a full local add run, omit `--limit`. Identifier API requests are batched at

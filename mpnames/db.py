@@ -15,6 +15,7 @@ from .mpcorb import OrbitRecord
 from .numbered_mps import DiscoveryRecord
 from .person_facets import CitationFacet, PersonFacetClassifier
 from .settings import DEFAULT_DB
+from .wgsbn import WITHDRAWN_NAMING_PERMIDS
 
 
 WORD_RE = re.compile(r"[A-Za-z][A-Za-z'-]{2,}")
@@ -380,6 +381,8 @@ def replace_wgsbn_bulletin(
     # identical, so retain the first naming record for this date-level index.
     unique_namings: dict[str, Any] = {}
     for naming in namings:
+        if naming.permid in WITHDRAWN_NAMING_PERMIDS:
+            continue
         unique_namings.setdefault(naming.permid, naming)
     connection.execute("DELETE FROM naming_publications WHERE source_url = ?", (source_url,))
     connection.executemany(
@@ -406,6 +409,23 @@ def replace_wgsbn_bulletin(
         (source_url, volume, issue, published_date, published_year),
     )
     return len(unique_namings)
+
+
+def purge_withdrawn_wgsbn_namings(connection: sqlite3.Connection) -> dict[str, int]:
+    """Remove names explicitly withdrawn by later WGSBN Bulletin errata."""
+    permids = sorted(WITHDRAWN_NAMING_PERMIDS)
+    placeholders = ", ".join("?" for _ in permids)
+    publication_count = connection.execute(
+        f"SELECT COUNT(*) AS c FROM naming_publications WHERE permid IN ({placeholders})",
+        permids,
+    ).fetchone()["c"]
+    object_count = connection.execute(
+        f"SELECT COUNT(*) AS c FROM minor_planets WHERE permid IN ({placeholders})",
+        permids,
+    ).fetchone()["c"]
+    connection.execute(f"DELETE FROM naming_publications WHERE permid IN ({placeholders})", permids)
+    connection.execute(f"DELETE FROM minor_planets WHERE permid IN ({placeholders})", permids)
+    return {"minor_planets": object_count, "naming_publications": publication_count}
 
 
 def sync_wgsbn_naming_metadata(connection: sqlite3.Connection) -> dict[str, int]:
