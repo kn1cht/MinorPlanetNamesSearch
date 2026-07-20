@@ -555,6 +555,10 @@ def incomplete_permids(connection: sqlite3.Connection) -> set[str]:
         FROM minor_planets
         WHERE iau_designation IS NULL
            OR packed_permid IS NULL
+           OR discovery_date IS NULL
+           OR discovery_site IS NULL
+           OR discoverer_text IS NULL
+           OR orbit_type IS NULL
         """
     ).fetchall()
     return {str(row["permid"]) for row in rows}

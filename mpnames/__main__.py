@@ -10,8 +10,6 @@ from .ingest import (
     INGEST_MODES,
     backfill_wgsbn_only,
     classify_person_facets_existing,
-    enrich_discovery_existing,
-    enrich_naming_publications,
     ingest,
     init_sample,
     reclassify_existing,
@@ -28,7 +26,6 @@ from .settings import (
     ORBIT_INTER_REQUEST_DELAY_SECONDS,
     ORBIT_LONG_PAUSE_EVERY_REQUESTS,
     ORBIT_LONG_PAUSE_SECONDS,
-    WGSBN_INTER_REQUEST_DELAY_SECONDS,
 )
 
 
@@ -95,24 +92,6 @@ def main(argv: list[str] | None = None) -> int:
     person_facets_parser.add_argument("--think", action="store_true", default=False)
     person_facets_parser.add_argument("--quiet", action="store_true", help="Hide progress output")
 
-    discovery_parser = subparsers.add_parser(
-        "enrich-discovery",
-        help="Fill discovery date/site/discoverer fields from cached NumberedMPs.txt",
-    )
-    discovery_parser.add_argument("--db", default=str(db.DEFAULT_DB))
-    discovery_parser.add_argument("--limit", type=int, default=None)
-    discovery_parser.add_argument("--refresh-cache", action="store_true", help="Download NumberedMPs.txt again")
-    discovery_parser.add_argument("--quiet", action="store_true", help="Hide progress output")
-
-    naming_parser = subparsers.add_parser(
-        "enrich-naming-publications",
-        help="Collect WGSBN Bulletin publication dates for named minor planets",
-    )
-    naming_parser.add_argument("--db", default=str(db.DEFAULT_DB))
-    naming_parser.add_argument("--refresh", action="store_true", help="Re-download already collected Bulletins")
-    naming_parser.add_argument("--delay", type=float, default=WGSBN_INTER_REQUEST_DELAY_SECONDS)
-    naming_parser.add_argument("--quiet", action="store_true", help="Hide progress output")
-
     wgsbn_only_parser = subparsers.add_parser(
         "backfill-wgsbn-only",
         help="Add explicitly selected WGSBN names that remain absent from MPC name data",
@@ -170,7 +149,10 @@ def main(argv: list[str] | None = None) -> int:
             f"inserted {result['inserted']}, updated {result['updated']}, "
             f"unchanged {result['unchanged']}; "
             f"{result['identifier_records']} identifier records, "
-            f"{result['orbit_records']} orbit records."
+            f"{result['orbit_records']} orbit records; "
+            f"WGSBN {result['naming_metadata_updated']} metadata updates "
+            f"({result['wgsbn_bulletins_fetched']} Bulletins / "
+            f"{result['wgsbn_namings_fetched']} namings fetched)."
         )
         return 0
 
@@ -212,33 +194,6 @@ def main(argv: list[str] | None = None) -> int:
         print(
             f"Person facets: {result['updated']} updated, {result['unchanged']} unchanged "
             f"of {result['records']} records; classifier={result['classifier']}; job={result['job_id']}."
-        )
-        return 0
-
-    if args.command == "enrich-discovery":
-        result = enrich_discovery_existing(
-            Path(args.db),
-            limit=args.limit,
-            refresh_cache=args.refresh_cache,
-            progress=ProgressReporter(enabled=not args.quiet),
-        )
-        print(
-            f"Discovery enrich: scanned {result['records']} records; "
-            f"updated {result['updated']}, unchanged {result['unchanged']}, missing {result['missing']}."
-        )
-        return 0
-
-    if args.command == "enrich-naming-publications":
-        result = enrich_naming_publications(
-            Path(args.db),
-            delay=args.delay,
-            refresh=args.refresh,
-            progress=ProgressReporter(enabled=not args.quiet),
-        )
-        print(
-            f"WGSBN naming enrich: {result['updated']} updated, {result['unchanged']} unchanged, "
-            f"{result['missing']} not in local MPC data; "
-            f"{result['fetched_bulletins']} Bulletins / {result['fetched_namings']} namings fetched."
         )
         return 0
 

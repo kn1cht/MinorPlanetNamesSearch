@@ -62,6 +62,7 @@ def ingest(
     classifier_mode: str = "rules",
     ollama_model: str | None = None,
     ollama_host: str = OLLAMA_HOST,
+    wgsbn_sync: bool = True,
     progress: ProgressReporter = QUIET_PROGRESS,
 ) -> dict[str, Any]:
     if mode not in INGEST_MODES:
@@ -103,6 +104,11 @@ def ingest(
         "inserted": 0,
         "updated": 0,
         "unchanged": 0,
+        "wgsbn_bulletins_fetched": 0,
+        "wgsbn_namings_fetched": 0,
+        "naming_metadata_updated": 0,
+        "naming_metadata_unchanged": 0,
+        "naming_metadata_missing": 0,
     }
     next_write_index = 0
     reset_done = False
@@ -192,8 +198,23 @@ def ingest(
     write_ready_records(len(selected_names))
     if job is not None:
         db.finish_classification_job(connection, job["job_id"], "completed")
+
+    # Keep the MPC ingest durable even if a later WGSBN request fails. A
+    # subsequent ``ingest --mode repair`` retries the WGSBN synchronization.
     connection.commit()
-    connection.close()
+
+    try:
+        if wgsbn_sync:
+            wgsbn_result = _collect_new_wgsbn_bulletins(connection, progress=progress)
+            stats["wgsbn_bulletins_fetched"] = wgsbn_result["fetched_bulletins"]
+            stats["wgsbn_namings_fetched"] = wgsbn_result["fetched_namings"]
+        naming_metadata = db.sync_wgsbn_naming_metadata(connection)
+        stats["naming_metadata_updated"] = naming_metadata["updated"]
+        stats["naming_metadata_unchanged"] = naming_metadata["unchanged"]
+        stats["naming_metadata_missing"] = naming_metadata["missing"]
+        connection.commit()
+    finally:
+        connection.close()
     progress.message("Ingest complete")
     return stats
 
@@ -406,93 +427,34 @@ def classify_person_facets_existing(
     return {"records": len(rows), "updated": updated, "unchanged": unchanged, "classifier": classifier_mode, "job_id": job["job_id"]}
 
 
-def enrich_discovery_existing(
-    db_path: Path,
-    *,
-    numbered_mps_url: str = NUMBERED_MPS_URL,
-    cache_path: Path = NUMBERED_MPS_CACHE,
-    refresh_cache: bool = False,
-    limit: int | None = None,
-    progress: ProgressReporter = QUIET_PROGRESS,
-) -> dict[str, Any]:
-    connection = db.connect(db_path)
-    db.initialize(connection)
-    discoveries = fetch_discoveries(
-        numbered_mps_url=numbered_mps_url,
-        cache_path=cache_path,
-        refresh_cache=refresh_cache,
-        progress=progress,
-    )
-    rows = connection.execute(
-        """
-        SELECT *
-        FROM minor_planets
-        ORDER BY CAST(permid AS INTEGER)
-        """
-    ).fetchall()
-    if limit is not None:
-        rows = rows[: max(0, limit)]
-
-    updated = 0
-    unchanged = 0
-    missing = 0
-    total = len(rows)
-    progress.message(f"Enriching discovery fields for {total} existing records")
-    for index, row in enumerate(rows, start=1):
-        discovery = discoveries.get(str(row["permid"]))
-        if not discovery:
-            missing += 1
-            continue
-        status = db.update_discovery(connection, row["permid"], discovery)
-        if status == "unchanged":
-            unchanged += 1
-        else:
-            updated += 1
-        if _should_report_item(index, total):
-            progress.step(
-                "Discovery enrich",
-                index,
-                total,
-                detail=f"updated={updated} unchanged={unchanged} missing={missing}",
-            )
-    connection.commit()
-    connection.close()
-    progress.message("Discovery enrichment complete")
-    return {"records": total, "updated": updated, "unchanged": unchanged, "missing": missing}
-
-
-def enrich_naming_publications(
-    db_path: Path,
+def _collect_new_wgsbn_bulletins(
+    connection: Any,
     *,
     archive_url: str = WGSBN_ARCHIVE_URL,
     delay: float = WGSBN_INTER_REQUEST_DELAY_SECONDS,
-    refresh: bool = False,
     progress: ProgressReporter = QUIET_PROGRESS,
 ) -> dict[str, Any]:
-    """Collect WGSBN Bulletins and attach official naming publication dates.
+    """Collect WGSBN Bulletins not already cached in the local database.
 
     WGSBN JSON files are authoritative for Bulletin contents beginning in 2021.
     A Bulletin's publication year is derived from its volume number (Volume 1 is
     2021), because the JSON archive's date labels need not be issue dates. Each
-    JSON record is joined to the local MPC data by permanent minor-planet number.
+    JSON record is joined to local MPC data after collection.
     """
     if delay < 0:
         raise ValueError("delay must be greater than or equal to zero")
 
-    connection = db.connect(db_path)
-    db.initialize(connection)
     progress.message(f"Fetching WGSBN Bulletin archive from {archive_url}")
     bulletins = parse_wgsbn_archive(_read_text_url(archive_url), archive_url)
     if not bulletins:
-        connection.close()
         raise ValueError("No WGSBN Bulletin JSON files found in archive")
 
     known_urls = db.existing_wgsbn_bulletin_urls(connection)
-    selected = bulletins if refresh else [bulletin for bulletin in bulletins if bulletin.source_url not in known_urls]
+    selected = [bulletin for bulletin in bulletins if bulletin.source_url not in known_urls]
     fetched_bulletins = fetched_namings = 0
     progress.message(
         f"Found {len(bulletins)} WGSBN Bulletins; fetching {len(selected)} "
-        f"({'refresh' if refresh else 'new'} records)"
+        "new records"
     )
     for index, bulletin in enumerate(selected, start=1):
         progress.step(
@@ -515,18 +477,10 @@ def enrich_naming_publications(
         if delay and index < len(selected):
             time.sleep(delay)
 
-    metadata = db.sync_wgsbn_naming_metadata(connection)
-    connection.commit()
-    connection.close()
-    progress.message(
-        "WGSBN naming enrichment complete "
-        f"(updated={metadata['updated']} unchanged={metadata['unchanged']} missing={metadata['missing']})"
-    )
     return {
         "bulletins": len(bulletins),
         "fetched_bulletins": fetched_bulletins,
         "fetched_namings": fetched_namings,
-        **metadata,
     }
 
 

@@ -8,6 +8,7 @@ from mpnames.categories import Category
 from mpnames.ingest import _unique_orbit_count, ingest, reclassify_existing
 from mpnames.mpcorb import OrbitRecord
 from mpnames.mpnames_parser import NameRecord
+from mpnames.wgsbn import WgsbnNaming
 
 
 def _identifier(permid: str, name: str, citation: str | None = None):
@@ -43,7 +44,7 @@ class IngestModeTests(unittest.TestCase):
             return {record.name_ascii: _identifier(record.permid, record.name_ascii) for record in names}
 
         with self._patched_sources(_records("1", "2", "3"), fake_identifiers):
-            result = ingest(self.db_path, mode="add", limit=2, classifier_mode="rules")
+            result = ingest(self.db_path, mode="add", limit=2, classifier_mode="rules", wgsbn_sync=False)
 
         self.assertEqual(seen, ["2", "3"])
         self.assertEqual(result["selected_records"], 2)
@@ -61,7 +62,7 @@ class IngestModeTests(unittest.TestCase):
             fetch_orbits=fetch_orbits,
             fetch_discoveries=Mock(return_value={}),
         ):
-            result = ingest(self.db_path, mode="add", limit=10, classifier_mode="rules")
+            result = ingest(self.db_path, mode="add", limit=10, classifier_mode="rules", wgsbn_sync=False)
 
         self.assertEqual(result["selected_records"], 0)
         fetch_identifiers.assert_not_called()
@@ -74,7 +75,7 @@ class IngestModeTests(unittest.TestCase):
             return {record.name_ascii: _identifier(record.permid, record.name_ascii) for record in names}
 
         with self._patched_sources(_records("1"), fake_identifiers):
-            result = ingest(self.db_path, mode="update", limit=1, classifier_mode="rules")
+            result = ingest(self.db_path, mode="update", limit=1, classifier_mode="rules", wgsbn_sync=False)
 
         self.assertEqual(result["selected_records"], 1)
         self.assertEqual(result["unchanged"], 1)
@@ -87,7 +88,7 @@ class IngestModeTests(unittest.TestCase):
             return {record.name_ascii: _identifier(record.permid, record.name_ascii) for record in names}
 
         with self._patched_sources(_records("1", "2"), fake_identifiers):
-            result = ingest(self.db_path, mode="reset", limit=1, classifier_mode="rules")
+            result = ingest(self.db_path, mode="reset", limit=1, classifier_mode="rules", wgsbn_sync=False)
 
         self.assertEqual(result["selected_records"], 1)
         self.assertEqual(result["inserted"], 1)
@@ -95,6 +96,7 @@ class IngestModeTests(unittest.TestCase):
 
     def test_repair_mode_fetches_incomplete_and_new_records(self):
         self._upsert("1")
+        self._mark_complete("1")
         self._upsert("2", identifier={})
         seen: list[str] = []
 
@@ -103,12 +105,61 @@ class IngestModeTests(unittest.TestCase):
             return {record.name_ascii: _identifier(record.permid, record.name_ascii) for record in names}
 
         with self._patched_sources(_records("1", "2", "3"), fake_identifiers):
-            result = ingest(self.db_path, mode="repair", limit=2, classifier_mode="rules")
+            result = ingest(self.db_path, mode="repair", limit=2, classifier_mode="rules", wgsbn_sync=False)
 
         self.assertEqual(seen, ["2", "3"])
         self.assertEqual(result["selected_records"], 2)
         self.assertEqual(result["updated"], 1)
         self.assertEqual(result["inserted"], 1)
+
+    def test_ingest_attaches_cached_wgsbn_metadata(self):
+        connection = db.connect(self.db_path)
+        db.initialize(connection)
+        source_url = "https://www.wgsbn-iau.org/files/json/V002/WGSBNBull_V002_001.json"
+        db.replace_wgsbn_bulletin(
+            connection,
+            source_url=source_url,
+            volume=2,
+            issue=1,
+            published_date="2022-09-12",
+            published_year=2022,
+            namings=[WgsbnNaming("2", "Name2", "A test city.", "WGSBN Bull. 2, #1, 5")],
+        )
+        connection.commit()
+        connection.close()
+
+        def fake_identifiers(names, **kwargs):
+            return {record.name_ascii: _identifier(record.permid, record.name_ascii) for record in names}
+
+        with self._patched_sources(_records("2"), fake_identifiers):
+            result = ingest(self.db_path, mode="add", classifier_mode="rules", wgsbn_sync=False)
+
+        connection = db.connect(self.db_path)
+        row = connection.execute(
+            "SELECT naming_published_year, naming_reference, naming_source, naming_source_url "
+            "FROM minor_planets WHERE permid = '2'"
+        ).fetchone()
+        connection.close()
+
+        self.assertEqual(result["naming_metadata_updated"], 1)
+        self.assertEqual(
+            tuple(row),
+            (2022, "WGSBN Bull. 2, #1, 5", "WGSBN Bulletin", source_url),
+        )
+
+    def test_ingest_collects_new_wgsbn_bulletins_by_default(self):
+        def fake_identifiers(names, **kwargs):
+            return {record.name_ascii: _identifier(record.permid, record.name_ascii) for record in names}
+
+        with self._patched_sources(_records("2"), fake_identifiers), patch(
+            "mpnames.ingest._collect_new_wgsbn_bulletins",
+            return_value={"fetched_bulletins": 1, "fetched_namings": 2},
+        ) as collect:
+            result = ingest(self.db_path, mode="add", classifier_mode="rules")
+
+        collect.assert_called_once()
+        self.assertEqual(result["wgsbn_bulletins_fetched"], 1)
+        self.assertEqual(result["wgsbn_namings_fetched"], 2)
 
     def test_ingest_classifies_ready_records_during_orbit_pause(self):
         records = _records("1", "2")
@@ -136,7 +187,7 @@ class IngestModeTests(unittest.TestCase):
             fetch_discoveries=Mock(return_value={}),
             CitationClassifier=Mock(return_value=classifier),
         ):
-            result = ingest(self.db_path, mode="add", limit=2, classifier_mode="ollama")
+            result = ingest(self.db_path, mode="add", limit=2, classifier_mode="ollama", wgsbn_sync=False)
 
         self.assertEqual(events[0], ("before_pause", None))
         self.assertEqual(events[1][0], "classify")
@@ -251,6 +302,20 @@ class IngestModeTests(unittest.TestCase):
         count = connection.execute("SELECT COUNT(*) AS c FROM minor_planets").fetchone()["c"]
         connection.close()
         return count
+
+    def _mark_complete(self, permid: str):
+        connection = db.connect(self.db_path)
+        connection.execute(
+            """
+            UPDATE minor_planets
+            SET discovery_date = '2000-01-01', discovery_site = 'Test Observatory',
+                discoverer_text = 'Test Discoverer', orbit_type = 'Main-belt'
+            WHERE permid = ?
+            """,
+            (permid,),
+        )
+        connection.commit()
+        connection.close()
 
     def _permids(self):
         connection = db.connect(self.db_path)

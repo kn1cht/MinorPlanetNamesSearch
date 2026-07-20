@@ -36,35 +36,23 @@ Ingest modes:
 - `add` default: fetch only named objects that are not already in the DB.
 - `update`: fetch existing objects too, but skip DB writes when nothing changed.
 - `reset`: clear the local DB, then fetch up to `--limit` objects.
-- `repair`: fetch objects missing from the DB, plus existing records with missing identifier fields.
+- `repair`: fetch objects missing from the DB, plus existing records with missing identifier, orbit, or discovery fields. It also retries WGSBN metadata synchronization.
 
 Discovery date, observatory/site, and discoverer information is read from
-MPC `NumberedMPs.txt` and cached locally at `data/NumberedMPs.txt`. To fill
-these fields for an existing database without re-requesting Identifier or Orbit
-API records, run:
-
-```powershell
-python -m mpnames enrich-discovery
-```
-
-Use `--refresh-cache` only when you want to download `NumberedMPs.txt` again.
+MPC `NumberedMPs.txt` and cached locally at `data/NumberedMPs.txt`. Newly
+ingested records receive these fields automatically; use `ingest --mode repair`
+to fill missing fields in existing records.
 
 ### Naming Publication Dates (WGSBN Bulletins)
 
-To attach the official publication date and reference for names announced in
-WGSBN Bulletins, run:
-
-```powershell
-python -m mpnames enrich-naming-publications
-```
-
-The importer downloads the official WGSBN JSON archive and joins each record to
-the local database by permanent minor-planet number. It derives the publication
+Every `ingest` run downloads the official WGSBN JSON archive index, fetches only
+new Bulletin JSON files, and joins their records to the local database by
+permanent minor-planet number. It derives the publication
 year mechanically from the Bulletin volume (Volume 1 is 2021), rather than using
 the JSON archive's file-date label. It records the earliest publication year,
 reference, and source URL. WGSBN Bulletin coverage begins in 2021; earlier names
-require a separate MPC Circulars backfill. Existing Bulletins are skipped on
-subsequent runs; use `--refresh` to download them again.
+require a separate MPC Circulars backfill. Use `ingest --mode repair` to retry
+this synchronization after a failed or interrupted ingest.
 
 If a named object remains absent from both the MPC name list and Identifier API,
 it can be explicitly retained from its WGSBN Bulletin record (rather than
@@ -163,8 +151,7 @@ MPC sources used:
 ```powershell
 python -m mpnames init-sample
 python -m mpnames ingest --mode add --limit 100 --classifier rules
-python -m mpnames enrich-discovery
-python -m mpnames enrich-naming-publications
+python -m mpnames ingest --mode repair --classifier rules
 python -m mpnames backfill-wgsbn-only --permid 579513
 python -m mpnames classify-person-facets --classifier rules
 python -m mpnames serve --host 127.0.0.1 --port 8765

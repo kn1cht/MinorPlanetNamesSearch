@@ -58,7 +58,7 @@ class ProgressTests(unittest.TestCase):
             fetch_orbits=Mock(return_value={}),
             fetch_discoveries=Mock(return_value={}),
         ):
-            ingest(Path(tempdir) / "progress.sqlite3", mode="add", limit=1, progress=progress)
+            ingest(Path(tempdir) / "progress.sqlite3", mode="add", limit=1, wgsbn_sync=False, progress=progress)
 
         text = output.getvalue()
         self.assertIn("Fetching named-object list", text)
