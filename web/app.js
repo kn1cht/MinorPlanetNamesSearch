@@ -718,7 +718,7 @@ async function loadDetail(permid) {
   const catBadges = (detail.categories || []).map(renderDetailBadge).join("");
   const facetBadges = (detail.citation_facets || []).map(renderDetailFacetBadge).join("");
   const roleFacets = (detail.citation_facets || []).filter((facet) => facet.kind === "person_role");
-  const genderFacet = (detail.citation_facets || []).find((facet) => facet.kind === "gender");
+  const genderFacet = (detail.citation_facets || []).find((facet) => facet.kind === "entity_gender");
   const publicationSection = renderPublicationSection(detail);
   const personFacetSection = renderPersonFacetSection(roleFacets, genderFacet);
 

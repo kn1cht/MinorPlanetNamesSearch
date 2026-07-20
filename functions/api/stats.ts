@@ -9,6 +9,8 @@ export const onRequestGet: PagesFunction<Env> = async (ctx) => {
     latestRes,
     orbitRes,
     citationRes,
+    personRoleRes,
+    genderRes,
     discovererRes,
     observatoryRes,
     neoRes,
@@ -22,6 +24,14 @@ export const onRequestGet: PagesFunction<Env> = async (ctx) => {
     ),
     db.prepare(
       "SELECT value, COUNT(*) AS count FROM categories WHERE kind = 'citation' " +
+      "GROUP BY 1 ORDER BY count DESC, 1"
+    ),
+    db.prepare(
+      "SELECT value, COUNT(*) AS count FROM citation_facets WHERE kind = 'person_role' " +
+      "GROUP BY 1 ORDER BY count DESC, 1"
+    ),
+    db.prepare(
+      "SELECT value, COUNT(*) AS count FROM citation_facets WHERE kind = 'entity_gender' " +
       "GROUP BY 1 ORDER BY count DESC, 1"
     ),
     db.prepare(
@@ -41,6 +51,8 @@ export const onRequestGet: PagesFunction<Env> = async (ctx) => {
     latest_updated_at: (latestRes.results[0] as { latest: string | null })?.latest ?? null,
     orbit_types: orbitRes.results,
     citation_categories: citationRes.results,
+    person_roles: personRoleRes.results,
+    genders: genderRes.results,
     discoverers: discovererRes.results,
     observatories: observatoryRes.results,
     flags: [

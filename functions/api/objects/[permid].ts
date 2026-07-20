@@ -25,11 +25,26 @@ export const onRequestGet: PagesFunction<Env, keyof Params> = async (ctx) => {
     .bind(permid)
     .all<{ kind: string; value: string; source: string; confidence: number }>();
 
+  const { results: facetRows } = await db
+    .prepare(
+      `SELECT kind, value, evidence_text, source, confidence
+       FROM citation_facets WHERE permid = ? ORDER BY kind, value, source`
+    )
+    .bind(permid)
+    .all<{
+      kind: string;
+      value: string;
+      evidence_text: string | null;
+      source: string;
+      confidence: number;
+    }>();
+
   const data = { ...row };
   data["is_neo"] = Boolean(data["is_neo"]);
   data["is_one_km_neo"] = Boolean(data["is_one_km_neo"]);
   data["is_pha"] = Boolean(data["is_pha"]);
   data["categories"] = catRows;
+  data["citation_facets"] = facetRows;
   // Citation text omitted – user directed to official source
   delete data["citation_text"];
   delete data["citation_html"];

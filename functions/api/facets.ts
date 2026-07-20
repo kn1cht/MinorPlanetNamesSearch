@@ -25,6 +25,8 @@ async function buildFacets(
   const [
     orbitRes,
     citationRes,
+    personRoleRes,
+    genderRes,
     discovererRes,
     observatoryRes,
     neoRes,
@@ -40,6 +42,22 @@ async function buildFacets(
       `SELECT c.value, COUNT(DISTINCT mp.permid) AS count
        FROM minor_planets mp ${joins}
        JOIN categories c ON mp.permid = c.permid AND c.kind = 'citation'
+       ${where}
+       GROUP BY 1 ORDER BY count DESC, 1`
+    ).bind(...filterParams),
+
+    db.prepare(
+      `SELECT cf.value, COUNT(DISTINCT mp.permid) AS count
+       FROM minor_planets mp ${joins}
+       JOIN citation_facets cf ON mp.permid = cf.permid AND cf.kind = 'person_role'
+       ${where}
+       GROUP BY 1 ORDER BY count DESC, 1`
+    ).bind(...filterParams),
+
+    db.prepare(
+      `SELECT cf.value, COUNT(DISTINCT mp.permid) AS count
+       FROM minor_planets mp ${joins}
+       JOIN citation_facets cf ON mp.permid = cf.permid AND cf.kind = 'entity_gender'
        ${where}
        GROUP BY 1 ORDER BY count DESC, 1`
     ).bind(...filterParams),
@@ -70,6 +88,8 @@ async function buildFacets(
   return {
     orbit_types: orbitRes.results as { value: string; count: number }[],
     citation_categories: citationRes.results as { value: string; count: number }[],
+    person_roles: personRoleRes.results as { value: string; count: number }[],
+    genders: genderRes.results as { value: string; count: number }[],
     discoverers: discovererRes.results as { value: string; count: number }[],
     observatories: observatoryRes.results as { value: string; count: number }[],
     flags: [

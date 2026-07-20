@@ -207,6 +207,8 @@ export interface FilterArgs {
   qTarget: string;
   orbit: string[];
   citationCategory: string[];
+  personRole: string[];
+  gender: string[];
   discoverer: string[];
   observatory: string[];
   flag: string[];
@@ -261,6 +263,24 @@ export function buildFilters(args: FilterArgs): {
       `c_filter.kind = 'citation' AND c_filter.value IN (${placeholders(citationValues)})`
     );
     queryParams.push(...citationValues);
+  }
+
+  const personRoleValues = normalizeFilterValues(args.personRole);
+  if (personRoleValues.length > 0) {
+    joinList.push("JOIN citation_facets cf_role_filter ON cf_role_filter.permid = mp.permid");
+    clauses.push(
+      `cf_role_filter.kind = 'person_role' AND cf_role_filter.value IN (${placeholders(personRoleValues)})`
+    );
+    queryParams.push(...personRoleValues);
+  }
+
+  const genderValues = normalizeFilterValues(args.gender);
+  if (genderValues.length > 0) {
+    joinList.push("JOIN citation_facets cf_gender_filter ON cf_gender_filter.permid = mp.permid");
+    clauses.push(
+      `cf_gender_filter.kind = 'entity_gender' AND cf_gender_filter.value IN (${placeholders(genderValues)})`
+    );
+    queryParams.push(...genderValues);
   }
 
   const discovererValues = normalizeFilterValues(args.discoverer, false);
@@ -430,6 +450,8 @@ export function parseFilterArgs(url: URL): FilterArgs {
     qTarget: param(url, "q_target", "both"),
     orbit: params(url, "orbit"),
     citationCategory: params(url, "citation_category"),
+    personRole: params(url, "person_role"),
+    gender: params(url, "gender"),
     discoverer: params(url, "discoverer"),
     observatory: params(url, "observatory"),
     flag: params(url, "flag"),

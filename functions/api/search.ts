@@ -48,7 +48,11 @@ export const onRequestGet: PagesFunction<Env> = async (ctx) => {
   const rows = itemsRes.results as Record<string, unknown>[];
 
   // Build items with explicit typing
-  const items: Array<Record<string, unknown> & { citation_categories: string[] }> = rows.map((row) => {
+  const items: Array<Record<string, unknown> & {
+    citation_categories: string[];
+    person_roles: string[];
+    gender?: string;
+  }> = rows.map((row) => {
     const citation = (row["citation_text"] as string) ?? "";
     return {
       ...row,
@@ -57,6 +61,7 @@ export const onRequestGet: PagesFunction<Env> = async (ctx) => {
       citation_snippet: makeCitationSnippet(citation, repQ),
       citation_text: undefined,
       citation_categories: [] as string[],
+      person_roles: [] as string[],
     };
   });
 
@@ -64,12 +69,18 @@ export const onRequestGet: PagesFunction<Env> = async (ctx) => {
   if (items.length > 0) {
     const permids = items.map((i) => i.permid as string);
     const placeholders = permids.map(() => "?").join(", ");
-    const { results: catRows } = await db
-      .prepare(
+    const [catResult, facetResult] = await db.batch([
+      db.prepare(
         `SELECT permid, value FROM categories WHERE kind = 'citation' AND permid IN (${placeholders}) ORDER BY value`
-      )
-      .bind(...permids)
-      .all<{ permid: string; value: string }>();
+      ).bind(...permids),
+      db.prepare(
+        `SELECT permid, kind, value FROM citation_facets
+         WHERE kind IN ('person_role', 'entity_gender') AND permid IN (${placeholders})
+         ORDER BY kind, value`
+      ).bind(...permids),
+    ]);
+    const catRows = catResult.results as { permid: string; value: string }[];
+    const facetRows = facetResult.results as { permid: string; kind: string; value: string }[];
     const byPermid: Record<string, string[]> = {};
     for (const r of catRows) {
       if (!byPermid[r.permid]) byPermid[r.permid] = [];
@@ -77,6 +88,21 @@ export const onRequestGet: PagesFunction<Env> = async (ctx) => {
     }
     for (const item of items) {
       item.citation_categories = byPermid[item.permid as string] ?? [];
+    }
+
+    const rolesByPermid: Record<string, string[]> = {};
+    const genderByPermid: Record<string, string> = {};
+    for (const facet of facetRows) {
+      if (facet.kind === "person_role") {
+        (rolesByPermid[facet.permid] ??= []).push(facet.value);
+      } else if (facet.kind === "entity_gender") {
+        genderByPermid[facet.permid] = facet.value;
+      }
+    }
+    for (const item of items) {
+      const permid = item.permid as string;
+      item.person_roles = rolesByPermid[permid] ?? [];
+      item.gender = genderByPermid[permid];
     }
   }
 
