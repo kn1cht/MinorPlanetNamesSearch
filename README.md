@@ -59,10 +59,12 @@ python -m mpnames enrich-naming-publications
 ```
 
 The importer downloads the official WGSBN JSON archive and joins each record to
-the local database by permanent minor-planet number. It records the earliest
-Bulletin publication date, reference, and source URL. WGSBN Bulletin coverage
-begins in 2021; earlier names require a separate MPC Circulars backfill. Existing
-Bulletins are skipped on subsequent runs; use `--refresh` to download them again.
+the local database by permanent minor-planet number. It derives the publication
+year mechanically from the Bulletin volume (Volume 1 is 2021), rather than using
+the JSON archive's file-date label. It records the earliest publication year,
+reference, and source URL. WGSBN Bulletin coverage begins in 2021; earlier names
+require a separate MPC Circulars backfill. Existing Bulletins are skipped on
+subsequent runs; use `--refresh` to download them again.
 
 If a named object remains absent from both the MPC name list and Identifier API,
 it can be explicitly retained from its WGSBN Bulletin record (rather than

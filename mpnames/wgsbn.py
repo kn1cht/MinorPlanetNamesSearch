@@ -83,6 +83,18 @@ def parse_wgsbn_namings(body: str) -> list[WgsbnNaming]:
     return namings
 
 
+def wgsbn_volume_year(volume: int) -> int:
+    """Return the Bulletin publication year encoded by its volume number.
+
+    WGSBN Volume 1 corresponds to 2021, so Volume ``n`` corresponds to
+    ``2020 + n``.  The JSON archive's date labels are file metadata and are not
+    used as a naming-publication date.
+    """
+    if volume < 1:
+        raise ValueError("WGSBN volume must be positive")
+    return 2020 + volume
+
+
 def _parse_archive_date(value: str) -> str:
     year_text, month_text, day_text = value.replace(".", "").split()
     month = month_text[:3].title()

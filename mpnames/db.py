@@ -94,6 +94,7 @@ def initialize(connection: sqlite3.Connection) -> None:
             citation_html TEXT,
             citation_text TEXT,
             naming_published_date TEXT,
+            naming_published_year INTEGER,
             naming_reference TEXT,
             naming_source TEXT,
             naming_source_url TEXT,
@@ -209,6 +210,7 @@ def initialize(connection: sqlite3.Connection) -> None:
             volume INTEGER NOT NULL,
             issue INTEGER NOT NULL,
             published_date TEXT NOT NULL,
+            published_year INTEGER NOT NULL,
             fetched_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
         );
 
@@ -216,6 +218,7 @@ def initialize(connection: sqlite3.Connection) -> None:
             permid TEXT NOT NULL,
             source_url TEXT NOT NULL,
             published_date TEXT NOT NULL,
+            published_year INTEGER NOT NULL,
             name TEXT NOT NULL,
             citation_text TEXT,
             reference TEXT,
@@ -286,6 +289,7 @@ def initialize(connection: sqlite3.Connection) -> None:
         """
     )
     _ensure_minor_planet_columns(connection)
+    _ensure_wgsbn_publication_year_columns(connection)
     _ensure_fts_schema(connection)
     _migrate_deprecated_citation_categories(connection)
     _migrate_missing_citation_categories(connection)
@@ -316,6 +320,7 @@ def _ensure_minor_planet_columns(connection: sqlite3.Connection) -> None:
         "discoverer_text": "TEXT",
         "discovery_source": "TEXT",
         "naming_published_date": "TEXT",
+        "naming_published_year": "INTEGER",
         "naming_reference": "TEXT",
         "naming_source": "TEXT",
         "naming_source_url": "TEXT",
@@ -323,6 +328,33 @@ def _ensure_minor_planet_columns(connection: sqlite3.Connection) -> None:
     for name, column_type in required.items():
         if name not in existing:
             connection.execute(f"ALTER TABLE minor_planets ADD COLUMN {name} {column_type}")
+
+
+def _ensure_wgsbn_publication_year_columns(connection: sqlite3.Connection) -> None:
+    bulletin_columns = {
+        row["name"] for row in connection.execute("PRAGMA table_info(wgsbn_bulletins)").fetchall()
+    }
+    if "published_year" not in bulletin_columns:
+        connection.execute("ALTER TABLE wgsbn_bulletins ADD COLUMN published_year INTEGER")
+    connection.execute(
+        "UPDATE wgsbn_bulletins SET published_year = 2020 + volume WHERE published_year IS NULL"
+    )
+
+    publication_columns = {
+        row["name"] for row in connection.execute("PRAGMA table_info(naming_publications)").fetchall()
+    }
+    if "published_year" not in publication_columns:
+        connection.execute("ALTER TABLE naming_publications ADD COLUMN published_year INTEGER")
+    connection.execute(
+        """
+        UPDATE naming_publications
+        SET published_year = (
+            SELECT published_year FROM wgsbn_bulletins
+            WHERE wgsbn_bulletins.source_url = naming_publications.source_url
+        )
+        WHERE published_year IS NULL
+        """
+    )
 
 
 def existing_wgsbn_bulletin_urls(connection: sqlite3.Connection) -> set[str]:
@@ -339,6 +371,7 @@ def replace_wgsbn_bulletin(
     volume: int,
     issue: int,
     published_date: str,
+    published_year: int,
     namings: list[Any],
 ) -> int:
     """Store the complete naming list for one WGSBN Bulletin."""
@@ -351,42 +384,43 @@ def replace_wgsbn_bulletin(
     connection.execute("DELETE FROM naming_publications WHERE source_url = ?", (source_url,))
     connection.executemany(
         """
-        INSERT INTO naming_publications(permid, source_url, published_date, name, citation_text, reference)
-        VALUES (?, ?, ?, ?, ?, ?)
+        INSERT INTO naming_publications(permid, source_url, published_date, published_year, name, citation_text, reference)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
         """,
         [
-            (naming.permid, source_url, published_date, naming.name, naming.citation, naming.reference)
+            (naming.permid, source_url, published_date, published_year, naming.name, naming.citation, naming.reference)
             for naming in unique_namings.values()
         ],
     )
     connection.execute(
         """
-        INSERT INTO wgsbn_bulletins(source_url, volume, issue, published_date)
-        VALUES (?, ?, ?, ?)
+        INSERT INTO wgsbn_bulletins(source_url, volume, issue, published_date, published_year)
+        VALUES (?, ?, ?, ?, ?)
         ON CONFLICT(source_url) DO UPDATE SET
             volume = excluded.volume,
             issue = excluded.issue,
             published_date = excluded.published_date,
+            published_year = excluded.published_year,
             fetched_at = CURRENT_TIMESTAMP
         """,
-        (source_url, volume, issue, published_date),
+        (source_url, volume, issue, published_date, published_year),
     )
     return len(unique_namings)
 
 
 def sync_wgsbn_naming_metadata(connection: sqlite3.Connection) -> dict[str, int]:
-    """Apply the earliest WGSBN publication date to locally stored minor planets."""
+    """Apply the earliest WGSBN publication year to locally stored minor planets."""
     rows = connection.execute(
         """
-        SELECT np.permid, np.published_date, np.reference, np.source_url
+        SELECT np.permid, np.published_year, np.reference, np.source_url
         FROM naming_publications AS np
         JOIN (
-            SELECT permid, MIN(published_date) AS published_date
+            SELECT permid, MIN(published_year) AS published_year
             FROM naming_publications
             GROUP BY permid
         ) AS first_publication
           ON first_publication.permid = np.permid
-         AND first_publication.published_date = np.published_date
+         AND first_publication.published_year = np.published_year
         ORDER BY np.permid, np.source_url
         """
     ).fetchall()
@@ -399,7 +433,7 @@ def sync_wgsbn_naming_metadata(connection: sqlite3.Connection) -> dict[str, int]
         selected.add(permid)
         current = connection.execute(
             """
-            SELECT naming_published_date, naming_reference, naming_source, naming_source_url
+            SELECT naming_published_date, naming_published_year, naming_reference, naming_source, naming_source_url
             FROM minor_planets WHERE permid = ?
             """,
             (permid,),
@@ -407,14 +441,14 @@ def sync_wgsbn_naming_metadata(connection: sqlite3.Connection) -> dict[str, int]
         if current is None:
             missing += 1
             continue
-        values = (row["published_date"], row["reference"], "WGSBN Bulletin", row["source_url"])
+        values = (None, row["published_year"], row["reference"], "WGSBN Bulletin", row["source_url"])
         if tuple(current) == values:
             unchanged += 1
             continue
         connection.execute(
             """
             UPDATE minor_planets
-            SET naming_published_date = ?, naming_reference = ?, naming_source = ?, naming_source_url = ?
+            SET naming_published_date = ?, naming_published_year = ?, naming_reference = ?, naming_source = ?, naming_source_url = ?
             WHERE permid = ?
             """,
             (*values, permid),

@@ -34,7 +34,7 @@ const translations = {
       "side.gender_stats": "Gender distribution",
 
       "detail.naming_publication": "Naming publication",
-      "detail.publication_date": "Publication date",
+      "detail.publication_date": "Publication year",
       "detail.reference": "Reference",
       "detail.source": "Source",
       "detail.person_facets": "Person facets",
@@ -96,7 +96,7 @@ const translations = {
       "side.gender_stats": "性別統計",
 
       "detail.naming_publication": "命名公表情報",
-      "detail.publication_date": "公表日",
+      "detail.publication_date": "公表年",
       "detail.reference": "参照",
       "detail.source": "情報源",
       "detail.person_facets": "人物ファセット",

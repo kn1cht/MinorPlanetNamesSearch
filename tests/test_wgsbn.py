@@ -6,7 +6,12 @@ from unittest.mock import patch
 from mpnames import db
 from mpnames.categories import Category
 from mpnames.ingest import backfill_wgsbn_only
-from mpnames.wgsbn import WgsbnNaming, parse_wgsbn_archive, parse_wgsbn_namings
+from mpnames.wgsbn import (
+    WgsbnNaming,
+    parse_wgsbn_archive,
+    parse_wgsbn_namings,
+    wgsbn_volume_year,
+)
 
 
 ARCHIVE_HTML = '''
@@ -29,6 +34,11 @@ class WgsbnParserTests(unittest.TestCase):
         )
 
         self.assertEqual(namings, [WgsbnNaming("5627", "Short", "A citation", "WGSBN Bull. 2, #1, 5")])
+
+    def test_volume_determines_the_publication_year(self):
+        self.assertEqual(wgsbn_volume_year(1), 2021)
+        self.assertEqual(wgsbn_volume_year(2), 2022)
+        self.assertEqual(wgsbn_volume_year(6), 2026)
 
 
 class WgsbnDatabaseTests(unittest.TestCase):
@@ -58,6 +68,7 @@ class WgsbnDatabaseTests(unittest.TestCase):
             volume=2,
             issue=1,
             published_date="2022-09-12",
+            published_year=2022,
             namings=[
                 WgsbnNaming("5627", "Short", "A citation", "WGSBN Bull. 2, #1, 5"),
                 WgsbnNaming("999999", "Future", None, "WGSBN Bull. 2, #1, 6"),
@@ -70,18 +81,19 @@ class WgsbnDatabaseTests(unittest.TestCase):
             volume=3,
             issue=1,
             published_date="2023-01-16",
+            published_year=2023,
             namings=[WgsbnNaming("5627", "Short", "Updated citation", "WGSBN Bull. 3, #1, 4")],
         )
 
         result = db.sync_wgsbn_naming_metadata(self.connection)
         row = self.connection.execute(
-            "SELECT naming_published_date, naming_reference, naming_source, naming_source_url FROM minor_planets WHERE permid = '5627'"
+            "SELECT naming_published_date, naming_published_year, naming_reference, naming_source, naming_source_url FROM minor_planets WHERE permid = '5627'"
         ).fetchone()
 
         self.assertEqual(result, {"publications": 2, "updated": 1, "unchanged": 0, "missing": 1})
         self.assertEqual(
             tuple(row),
-            ("2022-09-12", "WGSBN Bull. 2, #1, 5", "WGSBN Bulletin", first_url),
+            (None, 2022, "WGSBN Bull. 2, #1, 5", "WGSBN Bulletin", first_url),
         )
         self.assertEqual(db.existing_wgsbn_bulletin_urls(self.connection), {first_url, later_url})
 
@@ -93,6 +105,7 @@ class WgsbnDatabaseTests(unittest.TestCase):
             volume=2,
             issue=1,
             published_date="2022-09-12",
+            published_year=2022,
             namings=[
                 WgsbnNaming("5627", "Short", "Original", "WGSBN Bull. 2, #1, 5"),
                 WgsbnNaming("5627", "Short", "Repeated", "WGSBN Bull. 2, #1, 6"),
@@ -113,6 +126,7 @@ class WgsbnDatabaseTests(unittest.TestCase):
             volume=2,
             issue=1,
             published_date="2022-09-12",
+            published_year=2022,
             namings=[WgsbnNaming("999999", "Katalinkarikó", "A biochemist (b. 1955).", "WGSBN Bull. 2, #1, 13")],
         )
         self.connection.commit()
@@ -123,7 +137,7 @@ class WgsbnDatabaseTests(unittest.TestCase):
 
         row = self.connection.execute(
             """
-            SELECT name_ascii, name_display, citation_text, naming_published_date,
+            SELECT name_ascii, name_display, citation_text, naming_published_date, naming_published_year,
                    naming_reference, naming_source, naming_source_url
             FROM minor_planets WHERE permid = '999999'
             """
@@ -139,7 +153,8 @@ class WgsbnDatabaseTests(unittest.TestCase):
                 "Katalinkariko",
                 "Katalinkarikó",
                 "A biochemist (b. 1955).",
-                "2022-09-12",
+                None,
+                2022,
                 "WGSBN Bull. 2, #1, 13",
                 "WGSBN Bulletin",
                 source_url,

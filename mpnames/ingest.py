@@ -38,7 +38,7 @@ from .settings import (
     WGSBN_ARCHIVE_URL,
     WGSBN_INTER_REQUEST_DELAY_SECONDS,
 )
-from .wgsbn import parse_wgsbn_archive, parse_wgsbn_namings
+from .wgsbn import parse_wgsbn_archive, parse_wgsbn_namings, wgsbn_volume_year
 
 
 INGEST_MODES = {"add", "update", "reset", "repair"}
@@ -471,9 +471,10 @@ def enrich_naming_publications(
 ) -> dict[str, Any]:
     """Collect WGSBN Bulletins and attach official naming publication dates.
 
-    WGSBN JSON files are authoritative for Bulletins beginning in 2021.  The
-    archive list supplies each issue's publication date; each JSON record is
-    joined to the local MPC data by permanent minor-planet number.
+    WGSBN JSON files are authoritative for Bulletin contents beginning in 2021.
+    A Bulletin's publication year is derived from its volume number (Volume 1 is
+    2021), because the JSON archive's date labels need not be issue dates. Each
+    JSON record is joined to the local MPC data by permanent minor-planet number.
     """
     if delay < 0:
         raise ValueError("delay must be greater than or equal to zero")
@@ -507,6 +508,7 @@ def enrich_naming_publications(
             volume=bulletin.volume,
             issue=bulletin.issue,
             published_date=bulletin.published_date,
+            published_year=wgsbn_volume_year(bulletin.volume),
             namings=namings,
         )
         fetched_bulletins += 1
@@ -574,10 +576,10 @@ def backfill_wgsbn_only(
     for index, permid in enumerate(normalized_permids, start=1):
         publication = connection.execute(
             """
-            SELECT permid, name, citation_text, published_date, reference, source_url
+            SELECT permid, name, citation_text, published_year, reference, source_url
             FROM naming_publications
             WHERE permid = ?
-            ORDER BY published_date, source_url
+            ORDER BY published_year, source_url
             LIMIT 1
             """,
             (permid,),
@@ -607,12 +609,12 @@ def backfill_wgsbn_only(
         connection.execute(
             """
             UPDATE minor_planets
-            SET naming_published_date = ?, naming_reference = ?,
+            SET naming_published_date = NULL, naming_published_year = ?, naming_reference = ?,
                 naming_source = 'WGSBN Bulletin', naming_source_url = ?
             WHERE permid = ?
             """,
             (
-                publication["published_date"],
+                publication["published_year"],
                 publication["reference"],
                 publication["source_url"],
                 permid,

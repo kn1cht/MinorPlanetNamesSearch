@@ -759,7 +759,7 @@ async function loadDetail(permid) {
 }
 
 function renderPublicationSection(detail) {
-  const hasPublication = detail.naming_published_date || detail.naming_reference || detail.naming_source_url;
+  const hasPublication = detail.naming_published_year || detail.naming_reference || detail.naming_source_url;
   if (!hasPublication) return "";
   const source = detail.naming_source_url
     ? `<a href="${escapeHtml(detail.naming_source_url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(detail.naming_source || i18next.t("detail.source"))} ↗</a>`
@@ -768,7 +768,7 @@ function renderPublicationSection(detail) {
     <section class="detail-section">
       <h3>${i18next.t("detail.naming_publication")}</h3>
       <dl class="detail-facts">
-        <div><dt>${i18next.t("detail.publication_date")}</dt><dd>${escapeHtml(detail.naming_published_date || "—")}</dd></div>
+        <div><dt>${i18next.t("detail.publication_date")}</dt><dd>${escapeHtml(detail.naming_published_year || "—")}</dd></div>
         <div><dt>${i18next.t("detail.reference")}</dt><dd>${escapeHtml(detail.naming_reference || "—")}</dd></div>
         <div><dt>${i18next.t("detail.source")}</dt><dd>${source}</dd></div>
       </dl>
