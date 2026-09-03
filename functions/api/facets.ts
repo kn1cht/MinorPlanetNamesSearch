@@ -1,7 +1,10 @@
 import { Env } from "../types";
-import { jsonResponse, parseFilterArgs, buildFilters } from "../db";
+import { d1CacheHeaders, jsonResponse, parseFilterArgs, buildFilters } from "../db";
 
 export const onRequestGet: PagesFunction<Env> = async (ctx) => {
+  const cached = await caches.default.match(ctx.request);
+  if (cached) return cached;
+
   const url = new URL(ctx.request.url);
   const db = ctx.env.DB;
 
@@ -9,7 +12,9 @@ export const onRequestGet: PagesFunction<Env> = async (ctx) => {
   const { joins, where, params: filterParams } = buildFilters(filterArgs);
 
   const facets = await buildFacets(db, joins, where, filterParams);
-  return jsonResponse(facets);
+  const response = jsonResponse(facets, 200, d1CacheHeaders());
+  ctx.waitUntil(caches.default.put(ctx.request, response.clone()));
+  return response;
 };
 
 async function buildFacets(

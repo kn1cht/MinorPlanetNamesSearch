@@ -26,6 +26,13 @@ const state = {
   allDiscovererFacets: [],
   allObservatoryFacets: [],
   allFlagFacets: [],
+  baseOrbitFacets: [],
+  baseCitationFacets: [],
+  basePersonRoleFacets: [],
+  baseGenderFacets: [],
+  baseDiscovererFacets: [],
+  baseObservatoryFacets: [],
+  baseFlagFacets: [],
 };
 
 // Mapping from stateKey -> label shown in tags
@@ -75,19 +82,11 @@ const els = {
   pageLabel:           qs("#pageLabel"),
   nextPage:            qs("#nextPage"),
   lastPage:            qs("#lastPage"),
-  wordCloud:           qs("#wordCloud"),
-  wordCount:           qs("#wordCount"),
-  genderStats:         qs("#genderStats"),
-  genderStatsTotal:    qs("#genderStatsTotal"),
-  genderStatsBar:      qs("#genderStatsBar"),
-  genderStatsLegend:   qs("#genderStatsLegend"),
   detailBody:          qs("#detailBody"),
   sidePanel:           qs("#sidePanel"),
   closeSidePanel:      qs("#closeSidePanel"),
   tabDetail:           qs("#tabDetail"),
-  tabWordcloud:        qs("#tabWordcloud"),
   sideTabDetail:       qs("#sideTabDetail"),
-  sideTabWordcloud:    qs("#sideTabWordcloud"),
   mobileDetailOverlay: qs("#mobileDetailOverlay"),
   searchScrollContainer: qs("#searchScrollContainer"),
   searchControlsRow:   qs("#searchControlsRow"),
@@ -95,7 +94,10 @@ const els = {
 };
 
 let searchTimer = null;
+let facetRefreshTimer = null;
+let facetRequestVersion = 0;
 const AUTO_SEARCH_DEBOUNCE_MS = 450;
+const FACET_REFRESH_DEBOUNCE_MS = 200;
 
 /* ============================================================
    INIT
@@ -104,7 +106,7 @@ async function init() {
   await initI18n();
   els.langSwitch.value = i18next.language.startsWith('ja') ? 'ja' : 'en';
   bindEvents();
-  initMobileTabs();
+  initMobilePanel();
   updateSearchScrollShadows();
   updateQueryHelp();
   await loadStats();
@@ -239,15 +241,9 @@ function bindEvents() {
   });
   els.mobileDetailOverlay.addEventListener("click", closeMobileDetail);
 
-  // Mobile tabs: タブクリックで展開 + タブ切り替え
+  // Mobile detail button: タップで詳細パネルを展開
   els.tabDetail.addEventListener("click", (e) => {
     e.stopPropagation();
-    switchMobileTab("detail");
-    if (isMobile()) openMobileDetail();
-  });
-  els.tabWordcloud.addEventListener("click", (e) => {
-    e.stopPropagation();
-    switchMobileTab("wordcloud");
     if (isMobile()) openMobileDetail();
   });
 
@@ -268,6 +264,8 @@ function bindEvents() {
 
 function resetAllConditions() {
   clearTimeout(searchTimer);
+  clearTimeout(facetRefreshTimer);
+  facetRequestVersion++;
   state.queryTerms = [];
   state.queryMode = "and";
   state.queryTarget = "both";
@@ -287,12 +285,13 @@ function resetAllConditions() {
   updateClearQueryVisibility();
   els.sortField.value = state.sort;
   els.sortDirection.value = state.direction;
+  restoreBaseFacets();
   closeModal();
   refresh();
 }
 
 function hasAnyActiveCondition() {
-  return state.queryTerms.length > 0
+  return getSearchTermsForRequest().length > 0
     || state.orbits.length > 0
     || state.citationCategories.length > 0
     || state.personRoles.length > 0
@@ -305,6 +304,7 @@ function hasAnyActiveCondition() {
 function openModal() {
   els.filterModal.hidden = false;
   renderFacets();
+  if (hasAnyActiveCondition()) void refreshFacetsOnly();
   // フィルタ内のチェックリストをトップに戻す
   document.querySelectorAll(".check-list").forEach((el) => { el.scrollTop = 0; });
   document.body.style.overflow = "hidden";
@@ -328,43 +328,26 @@ async function loadStats() {
   } else {
     els.datasetMeta.textContent = i18next.t("header.dataset_meta_none");
   }
-  state.allOrbitFacets        = stats.orbit_types         || [];
-  state.allCitationFacets     = stats.citation_categories || [];
-  state.allPersonRoleFacets   = stats.person_roles         || [];
-  state.allGenderFacets       = stats.genders              || [];
-  state.allDiscovererFacets   = stats.discoverers          || [];
-  state.allObservatoryFacets  = stats.observatories        || [];
-  state.allFlagFacets         = stats.flags               || [];
+  state.baseOrbitFacets        = stats.orbit_types         || [];
+  state.baseCitationFacets     = stats.citation_categories || [];
+  state.basePersonRoleFacets   = stats.person_roles         || [];
+  state.baseGenderFacets       = stats.genders             || [];
+  state.baseDiscovererFacets   = stats.discoverers         || [];
+  state.baseObservatoryFacets  = stats.observatories       || [];
+  state.baseFlagFacets         = stats.flags               || [];
+  restoreBaseFacets();
 }
 
 async function refresh() {
   const params = currentParams();
   els.loadingOverlay.hidden = false;
   try {
-    const [searchData, wordData, facetData] = await Promise.all([
-      getJson(`/api/search?${params.toString()}`),
-      getJson(`/api/wordcloud?${params.toString()}`),
-      getJson(`/api/facets?${params.toString()}`),
-    ]);
+    const searchData = await getJson(`/api/search?${params.toString()}`);
     state.total = searchData.total;
-    // 動的ファセットカウントを更新
-    state.allOrbitFacets        = _mergeFacets(state.allOrbitFacets,        facetData.orbit_types         || []);
-    state.allCitationFacets     = _mergeFacets(state.allCitationFacets,     facetData.citation_categories || []);
-    state.allPersonRoleFacets   = _mergeFacets(state.allPersonRoleFacets,   facetData.person_roles         || []);
-    state.allGenderFacets       = _mergeFacets(state.allGenderFacets,       facetData.genders              || []);
-    state.allDiscovererFacets   = _mergeFacets(state.allDiscovererFacets,   facetData.discoverers          || []);
-    state.allObservatoryFacets  = _mergeFacets(state.allObservatoryFacets,  facetData.observatories        || []);
-    state.allFlagFacets         = _mergeFacets(state.allFlagFacets,         facetData.flags               || []);
     renderResults(searchData.items || []);
-    renderWordCloud(wordData.words || []);
-    renderGenderStats(facetData.genders || []);
     renderActiveFilterTags();
     updatePager();
-    // フィルターモーダルが開いている場合はファセット表示を更新
-    if (!els.filterModal.hidden) renderFacets();
-    // スクロールをトップに戻す
     els.results.scrollTop = 0;
-    els.wordCloud.scrollTop = 0;
   } finally {
     els.loadingOverlay.hidden = true;
   }
@@ -375,20 +358,43 @@ async function refresh() {
  * state[stateKey] は呼び出し前に更新済みであること。
  */
 async function refreshFacetsOnly() {
-  const params = currentParams();
+  const params = currentFacetParams();
+  const requestVersion = ++facetRequestVersion;
   try {
     const facetData = await getJson(`/api/facets?${params.toString()}`);
-    state.allOrbitFacets        = _mergeFacets(state.allOrbitFacets,        facetData.orbit_types         || []);
-    state.allCitationFacets     = _mergeFacets(state.allCitationFacets,     facetData.citation_categories || []);
-    state.allPersonRoleFacets   = _mergeFacets(state.allPersonRoleFacets,   facetData.person_roles         || []);
-    state.allGenderFacets       = _mergeFacets(state.allGenderFacets,       facetData.genders              || []);
-    state.allDiscovererFacets   = _mergeFacets(state.allDiscovererFacets,   facetData.discoverers          || []);
-    state.allObservatoryFacets  = _mergeFacets(state.allObservatoryFacets,  facetData.observatories        || []);
-    state.allFlagFacets         = _mergeFacets(state.allFlagFacets,         facetData.flags               || []);
+    if (requestVersion !== facetRequestVersion) return;
+    applyFacetData(facetData);
     renderFacets();
   } catch (e) {
     console.warn("facet refresh failed", e);
   }
+}
+
+function scheduleFacetRefresh() {
+  clearTimeout(facetRefreshTimer);
+  facetRefreshTimer = setTimeout(() => {
+    if (!els.filterModal.hidden) void refreshFacetsOnly();
+  }, FACET_REFRESH_DEBOUNCE_MS);
+}
+
+function restoreBaseFacets() {
+  state.allOrbitFacets = state.baseOrbitFacets;
+  state.allCitationFacets = state.baseCitationFacets;
+  state.allPersonRoleFacets = state.basePersonRoleFacets;
+  state.allGenderFacets = state.baseGenderFacets;
+  state.allDiscovererFacets = state.baseDiscovererFacets;
+  state.allObservatoryFacets = state.baseObservatoryFacets;
+  state.allFlagFacets = state.baseFlagFacets;
+}
+
+function applyFacetData(facetData) {
+  state.allOrbitFacets       = _mergeFacets(state.baseOrbitFacets,       facetData.orbit_types         || []);
+  state.allCitationFacets    = _mergeFacets(state.baseCitationFacets,    facetData.citation_categories || []);
+  state.allPersonRoleFacets  = _mergeFacets(state.basePersonRoleFacets,  facetData.person_roles         || []);
+  state.allGenderFacets      = _mergeFacets(state.baseGenderFacets,      facetData.genders              || []);
+  state.allDiscovererFacets  = _mergeFacets(state.baseDiscovererFacets,  facetData.discoverers          || []);
+  state.allObservatoryFacets = _mergeFacets(state.baseObservatoryFacets, facetData.observatories        || []);
+  state.allFlagFacets        = _mergeFacets(state.baseFlagFacets,        facetData.flags                || []);
 }
 
 /**
@@ -403,7 +409,7 @@ function _mergeFacets(baseFacets, liveFacets) {
   }));
 }
 
-function currentParams() {
+function currentFacetParams() {
   const params = new URLSearchParams();
   getSearchTermsForRequest().forEach((v) => params.append("q", v));
   params.set("q_mode", state.queryMode);
@@ -415,10 +421,15 @@ function currentParams() {
   state.discoverers.forEach((v)       => params.append("discoverer", v));
   state.observatories.forEach((v)     => params.append("observatory", v));
   state.flags.forEach((v)             => params.append("flag", v));
-  params.set("sort",      state.sort);
+  return params;
+}
+
+function currentParams() {
+  const params = currentFacetParams();
+  params.set("sort", state.sort);
   params.set("direction", state.direction);
-  params.set("limit",     String(state.limit));
-  params.set("offset",    String(state.offset));
+  params.set("limit", String(state.limit));
+  params.set("offset", String(state.offset));
   return params;
 }
 
@@ -588,9 +599,9 @@ function renderCheckboxGroup(container, values, selected, stateKey) {
         const cur     = new Set(state[stateKey]);
         if (checked) cur.add(value); else cur.delete(value);
         state[stateKey] = Array.from(cur);
-        // タグを即時更新し、ファセット件数もリアルタイムで更新する
+        // タグを即時更新し、ファセット集計は短いデバウンス後に更新する
         renderActiveFilterTags();
-        refreshFacetsOnly();
+        scheduleFacetRefresh();
       });
     }
     container.appendChild(label);
@@ -652,60 +663,6 @@ function updateQueryHelp() {
 }
 
 /* ============================================================
-   RENDER: WORD CLOUD
-   ============================================================ */
-function renderWordCloud(words) {
-  els.wordCloud.innerHTML = "";
-  els.wordCount.textContent = `${formatNumber(words.length)}語`;
-  if (!words.length) {
-    els.wordCloud.innerHTML = `<div class="empty">キーワードなし</div>`;
-    return;
-  }
-  const max = Math.max(...words.map((w) => w.count));
-  words.forEach((item, index) => {
-    const row = document.createElement("div");
-    row.className = "keyword-row";
-    row.title = `${item.word}: ${item.count}件`;
-    row.innerHTML = `
-      <span class="keyword-rank">${index + 1}</span>
-      <span class="keyword-word">${escapeHtml(item.word)}</span>
-      <span class="keyword-meter"><span style="width:${Math.max(6, Math.round((item.count / max) * 100))}%"></span></span>
-      <span class="keyword-count">${formatNumber(item.count)}</span>
-    `;
-    els.wordCloud.appendChild(row);
-  });
-}
-
-const GENDER_ORDER = ["Female", "Male", "Multiple/Mixed", "Unknown", "Non-person"];
-
-function renderGenderStats(facets) {
-  const counts = new Map(facets.map((facet) => [facet.value, facet.count]));
-  const ordered = [
-    ...GENDER_ORDER.filter((value) => counts.has(value)),
-    ...facets.map((facet) => facet.value).filter((value) => !GENDER_ORDER.includes(value)),
-  ].map((value) => ({ value, count: counts.get(value) || 0 })).filter((item) => item.count > 0);
-  const total = ordered.reduce((sum, item) => sum + item.count, 0);
-
-  els.genderStats.hidden = total === 0;
-  if (!total) return;
-
-  els.genderStatsTotal.textContent = `${formatNumber(total)}件`;
-  els.genderStatsBar.innerHTML = ordered.map((item) => {
-    const percentage = (item.count / total) * 100;
-    const label = `${item.value}: ${formatNumber(item.count)} (${percentage.toFixed(1)}%)`;
-    return `<span class="gender-segment gender-segment--${slug(item.value)}" style="width:${percentage}%" title="${escapeHtml(label)}"></span>`;
-  }).join("");
-  els.genderStatsBar.setAttribute("aria-label", `${i18next.t("side.gender_stats")}: ${ordered.map((item) => `${item.value} ${formatNumber(item.count)}`).join(", ")}`);
-  els.genderStatsLegend.innerHTML = ordered.map((item) => `
-    <span class="gender-legend-item">
-      <i class="gender-legend-swatch gender-segment--${slug(item.value)}"></i>
-      <span>${escapeHtml(item.value)}</span>
-      <strong>${formatNumber(item.count)}</strong>
-    </span>
-  `).join("");
-}
-
-/* ============================================================
    RENDER: DETAIL
    ============================================================ */
 async function loadDetail(permid) {
@@ -751,9 +708,8 @@ async function loadDetail(permid) {
   // 詳細パネルのスクロールをトップに戻す
   els.detailBody.scrollTop = 0;
 
-  // モバイル: 詳細タブにフォーカスしてパネルを開く
+  // モバイル: 詳細パネルを開く
   if (isMobile()) {
-    switchMobileTab("detail");
     openMobileDetail();
   }
 }
@@ -957,9 +913,9 @@ function renderSnippet(v) {
    MOBILE DETAIL PANEL
    ============================================================ */
 
-/** 初期タブ状態を設定（常にdetailタブから始める） */
-function initMobileTabs() {
-  switchMobileTab("detail");
+/** 詳細パネルをモバイル用に初期化する。 */
+function initMobilePanel() {
+  els.sideTabDetail.classList.add("tab-active");
 }
 
 /** 現在モバイルレイアウトか判定 */
@@ -980,22 +936,6 @@ function closeMobileDetail() {
   els.mobileDetailOverlay.hidden = true;
   document.body.style.overflow = "";
   // is-openを外すだけで transform: translateY(calc(100% - 44px)) に戻る
-}
-
-/**
- * モバイルタブを切り替える
- * @param {"detail"|"wordcloud"} tab
- */
-function switchMobileTab(tab) {
-  const isDetail = tab === "detail";
-  // タブボタンのアクティブ状態
-  els.tabDetail.classList.toggle("active", isDetail);
-  els.tabWordcloud.classList.toggle("active", !isDetail);
-  els.tabDetail.setAttribute("aria-selected", isDetail ? "true" : "false");
-  els.tabWordcloud.setAttribute("aria-selected", isDetail ? "false" : "true");
-  // パネルの表示切り替え
-  els.sideTabDetail.classList.toggle("tab-active", isDetail);
-  els.sideTabWordcloud.classList.toggle("tab-active", !isDetail);
 }
 
 /** 検索コントロールの横スクロールシャドウを更新 */

@@ -9,9 +9,13 @@ import {
   buildOrderBy,
   makeCitationSnippet,
   representativeQuery,
+  d1CacheHeaders,
 } from "../db";
 
 export const onRequestGet: PagesFunction<Env> = async (ctx) => {
+  const cached = await caches.default.match(ctx.request);
+  if (cached) return cached;
+
   const url = new URL(ctx.request.url);
   const db = ctx.env.DB;
 
@@ -70,14 +74,14 @@ export const onRequestGet: PagesFunction<Env> = async (ctx) => {
     const permids = items.map((i) => i.permid as string);
     const placeholders = permids.map(() => "?").join(", ");
     const [catResult, facetResult] = await db.batch([
-      db.prepare(
-        `SELECT permid, value FROM categories WHERE kind = 'citation' AND permid IN (${placeholders}) ORDER BY value`
-      ).bind(...permids),
-      db.prepare(
-        `SELECT permid, kind, value FROM citation_facets
-         WHERE kind IN ('person_role', 'entity_gender') AND permid IN (${placeholders})
-         ORDER BY kind, value`
-      ).bind(...permids),
+    db.prepare(
+      `SELECT permid, value FROM categories WHERE permid IN (${placeholders}) AND kind = 'citation' ORDER BY permid, value`
+    ).bind(...permids),
+    db.prepare(
+      `SELECT permid, kind, value FROM citation_facets
+         WHERE permid IN (${placeholders}) AND kind IN ('person_role', 'entity_gender')
+         ORDER BY permid, kind, value`
+    ).bind(...permids),
     ]);
     const catRows = catResult.results as { permid: string; value: string }[];
     const facetRows = facetResult.results as { permid: string; kind: string; value: string }[];
@@ -106,10 +110,12 @@ export const onRequestGet: PagesFunction<Env> = async (ctx) => {
     }
   }
 
-  return jsonResponse({
+  const response = jsonResponse({
     items,
     limit,
     offset,
     total,
-  });
+  }, 200, d1CacheHeaders());
+  ctx.waitUntil(caches.default.put(ctx.request, response.clone()));
+  return response;
 };

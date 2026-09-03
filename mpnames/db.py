@@ -138,6 +138,9 @@ def initialize(connection: sqlite3.Connection) -> None:
             FOREIGN KEY (permid) REFERENCES minor_planets(permid) ON DELETE CASCADE
         );
 
+        CREATE INDEX IF NOT EXISTS categories_kind_value_permid
+        ON categories(kind, value, permid);
+
         CREATE TABLE IF NOT EXISTS citation_facets (
             permid TEXT NOT NULL,
             kind TEXT NOT NULL,
@@ -190,6 +193,15 @@ def initialize(connection: sqlite3.Connection) -> None:
             PRIMARY KEY (permid, kind, value),
             FOREIGN KEY (permid) REFERENCES minor_planets(permid) ON DELETE CASCADE
         );
+
+        CREATE INDEX IF NOT EXISTS discovery_facets_kind_value_permid
+        ON discovery_facets(kind, value, permid);
+
+        CREATE INDEX IF NOT EXISTS minor_planets_is_neo_permid
+        ON minor_planets(is_neo, permid);
+
+        CREATE INDEX IF NOT EXISTS minor_planets_is_pha_permid
+        ON minor_planets(is_pha, permid);
 
         CREATE TABLE IF NOT EXISTS ingest_runs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,

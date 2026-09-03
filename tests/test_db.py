@@ -23,6 +23,20 @@ class DatabaseTests(unittest.TestCase):
         self.connection.close()
         self.tempdir.cleanup()
 
+    def test_initialize_creates_facet_query_indexes(self):
+        index_names = {
+            row["name"]
+            for row in self.connection.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'index'"
+            )
+        }
+        self.assertTrue({
+            "categories_kind_value_permid",
+            "discovery_facets_kind_value_permid",
+            "minor_planets_is_neo_permid",
+            "minor_planets_is_pha_permid",
+        }.issubset(index_names))
+
     def test_search_by_name(self):
         result = db.search(self.connection, q="Aachen")
         self.assertEqual(result["total"], 1)

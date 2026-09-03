@@ -1,7 +1,10 @@
 import { Env } from "../types";
-import { jsonResponse } from "../db";
+import { d1CacheHeaders, jsonResponse } from "../db";
 
 export const onRequestGet: PagesFunction<Env> = async (ctx) => {
+  const cached = await caches.default.match(ctx.request);
+  if (cached) return cached;
+
   const db = ctx.env.DB;
 
   const [
@@ -46,7 +49,7 @@ export const onRequestGet: PagesFunction<Env> = async (ctx) => {
     db.prepare("SELECT COUNT(*) AS c FROM minor_planets WHERE is_pha = 1"),
   ]);
 
-  return jsonResponse({
+  const response = jsonResponse({
     total: (totalRes.results[0] as { c: number })?.c ?? 0,
     latest_updated_at: (latestRes.results[0] as { latest: string | null })?.latest ?? null,
     orbit_types: orbitRes.results,
@@ -59,5 +62,7 @@ export const onRequestGet: PagesFunction<Env> = async (ctx) => {
       { value: "NEO", count: (neoRes.results[0] as { c: number })?.c ?? 0 },
       { value: "PHA", count: (phaRes.results[0] as { c: number })?.c ?? 0 },
     ],
-  });
+  }, 200, d1CacheHeaders());
+  ctx.waitUntil(caches.default.put(ctx.request, response.clone()));
+  return response;
 };

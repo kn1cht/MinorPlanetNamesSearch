@@ -101,36 +101,18 @@
       </div>
     </section>
 
-    <!-- Right: detail + wordcloud (30%) -->
+    <!-- Right: selected object detail (30%) -->
     <aside id="sidePanel" class="side-panel">
-      <!-- Mobile: タブバー + 閉じるボタン -->
+      <!-- Mobile: detail button + close button -->
       <div class="side-panel-mobile-header">
-        <div class="side-tabs" role="tablist">
-          <button class="side-tab active" id="tabDetail" role="tab" aria-selected="true"
-            aria-controls="sideTabDetail" data-i18n="side.tab_detail">詳細</button>
-          <button class="side-tab" id="tabWordcloud" role="tab" aria-selected="false"
-            aria-controls="sideTabWordcloud" data-i18n="side.tab_wordcloud">キーワード頻度</button>
+        <div class="side-tabs">
+          <button class="side-tab active" id="tabDetail" type="button" data-i18n="side.tab_detail">詳細</button>
         </div>
         <button id="closeSidePanel" class="close-side-panel" type="button" aria-label="閉じる">✕</button>
       </div>
-      <div class="side-panel-detail" id="sideTabDetail" role="tabpanel">
+      <div class="side-panel-detail" id="sideTabDetail">
         <div class="panel-title" data-i18n="side.detail_title">詳細</div>
         <div id="detailBody" class="detail-body" data-i18n="side.detail_empty">リストから天体を選択してください。</div>
-      </div>
-      <div class="side-panel-wordcloud" id="sideTabWordcloud" role="tabpanel">
-        <div class="panel-title">
-          <span data-i18n="side.wordcloud_title">キーワード頻度</span>
-          <span id="wordCount" class="word-count-badge">—</span>
-        </div>
-        <div id="wordCloud" class="word-cloud" aria-label="Keyword frequency"></div>
-        <section id="genderStats" class="gender-stats" aria-live="polite">
-          <div class="gender-stats-header">
-            <span data-i18n="side.gender_stats">性別統計</span>
-            <span id="genderStatsTotal" class="word-count-badge">—</span>
-          </div>
-          <div id="genderStatsBar" class="gender-stats-bar" role="img"></div>
-          <div id="genderStatsLegend" class="gender-stats-legend"></div>
-        </section>
       </div>
     </aside>
   </div>

@@ -64,6 +64,20 @@ DROP TABLE IF EXISTS minor_planets;
         for l in schema_lines: f.write(l + '\n')
         for l in insert_lines: f.write(l + '\n')
         for l in trigger_lines: f.write(l + '\n')
+
+        # These indexes must be present in D1 even when the source SQLite file
+        # predates the current application schema.
+        f.write('''
+CREATE INDEX IF NOT EXISTS categories_kind_value_permid
+ON categories(kind, value, permid);
+CREATE INDEX IF NOT EXISTS discovery_facets_kind_value_permid
+ON discovery_facets(kind, value, permid);
+CREATE INDEX IF NOT EXISTS minor_planets_is_neo_permid
+ON minor_planets(is_neo, permid);
+CREATE INDEX IF NOT EXISTS minor_planets_is_pha_permid
+ON minor_planets(is_pha, permid);
+PRAGMA optimize;
+''')
         
         # Append FTS table creation and triggers
         f.write('''

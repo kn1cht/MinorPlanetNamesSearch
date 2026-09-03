@@ -432,15 +432,30 @@ export function extractWords(text: string, counter: Map<string, number>): void {
 
 export function jsonResponse(
   data: unknown,
-  status = 200
+  status = 200,
+  extraHeaders: Record<string, string> = {}
 ): Response {
   return new Response(JSON.stringify(data), {
     status,
     headers: {
       "Content-Type": "application/json; charset=utf-8",
       "Access-Control-Allow-Origin": "*",
+      ...extraHeaders,
     },
   });
+}
+
+/**
+ * The data is public and is replaced as a complete D1 snapshot. A short edge
+ * cache protects D1 from duplicate UI requests while bounding stale results
+ * after a data update.
+ */
+export const D1_RESPONSE_CACHE_SECONDS = 300;
+
+export function d1CacheHeaders(): Record<string, string> {
+  return {
+    "Cache-Control": `public, max-age=0, s-maxage=${D1_RESPONSE_CACHE_SECONDS}`,
+  };
 }
 
 export function parseFilterArgs(url: URL): FilterArgs {

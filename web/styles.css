@@ -653,7 +653,6 @@ h1 {
   display: flex;
   flex-direction: column;
   min-height: 0;
-  border-bottom: 1px solid var(--line);
 }
 .side-panel-wordcloud {
   flex: 0 0 auto;
@@ -1212,27 +1211,16 @@ mark.hl {
       /* タップで展開できることを示唆 */
   }
 
-  /* デスクトップ用タイトルを非表示（タブで代替） */
-  .side-panel-detail > .panel-title,
-  .side-panel-wordcloud > .panel-title {
+  /* モバイルヘッダーが詳細タイトルを代替 */
+  .side-panel-detail > .panel-title {
     display: none;
   }
 
-  /* タブパネルの表示/非表示 */
-  .side-panel-detail,
-  .side-panel-wordcloud {
-    display: none;
+  .side-panel-detail {
+    display: flex;
     flex: 1;
     min-height: 0;
-  }
-  .side-panel-detail.tab-active,
-  .side-panel-wordcloud.tab-active {
-    display: flex;
     flex-direction: column;
-  }
-  /* キーワード頻度パネルは固定高を解除 */
-  .side-panel-wordcloud.tab-active {
-    height: auto;
   }
 
   /* ---------- フィルターモーダル: 1カラム ---------- */
