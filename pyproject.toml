@@ -4,6 +4,8 @@ version = "0.1.0"
 description = "Local search and analysis UI for named minor planets"
 requires-python = ">=3.11"
 dependencies = []
+authors = [{ name = "kn1cht" }]
+license = { text = "MIT" }
 
 [project.scripts]
 mpnames = "mpnames.__main__:main"
