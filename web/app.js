@@ -6,6 +6,7 @@ const state = {
   queryTerms: [],
   queryMode: "and",
   queryTarget: "both",
+  datasetUpdatedAt: null,
   orbits: [],
   citationCategories: [],
   personRoles: [],
@@ -121,6 +122,7 @@ function bindEvents() {
     const lang = e.target.value;
     i18next.changeLanguage(lang).then(() => {
       updateTranslations();
+      updateDatasetMeta();
       renderActiveFilterTags();
       refresh(); // 再描画が必要な要素（件数等）を更新するため
     });
@@ -320,14 +322,22 @@ function closeModal() {
 /* ============================================================
    DATA LOADING
    ============================================================ */
+function updateDatasetMeta() {
+  // data-i18n 属性が残っていると言語切り替え時に "Loading..." で上書きされるため削除する
+  els.datasetMeta.removeAttribute("data-i18n");
+  if (state.datasetUpdatedAt) {
+    els.datasetMeta.textContent = i18next.t("header.dataset_meta_updated", { date: state.datasetUpdatedAt });
+  } else if (state.datasetUpdatedAt === "") {
+    els.datasetMeta.textContent = i18next.t("header.dataset_meta_none");
+  }
+  // null の場合はまだ読み込み中なので何もしない（data-i18n による Loading 表示を維持）
+}
+
 async function loadStats() {
   const stats = await getJson("/api/stats");
   els.totalObjects.textContent = formatNumber(stats.total);
-  if (stats.latest_updated_at) {
-    els.datasetMeta.textContent = i18next.t("header.dataset_meta_updated", { date: stats.latest_updated_at.slice(0, 10) });
-  } else {
-    els.datasetMeta.textContent = i18next.t("header.dataset_meta_none");
-  }
+  state.datasetUpdatedAt = stats.latest_updated_at ? stats.latest_updated_at.slice(0, 10) : "";
+  updateDatasetMeta();
   state.baseOrbitFacets        = stats.orbit_types         || [];
   state.baseCitationFacets     = stats.citation_categories || [];
   state.basePersonRoleFacets   = stats.person_roles         || [];
