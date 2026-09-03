@@ -10,11 +10,20 @@ import {
   makeCitationSnippet,
   representativeQuery,
   d1CacheHeaders,
+  rateLimitResponse,
 } from "../db";
 
 export const onRequestGet: PagesFunction<Env> = async (ctx) => {
   const cached = await caches.default.match(ctx.request);
   if (cached) return cached;
+
+  const limited = await rateLimitResponse(
+    ctx.request,
+    "search",
+    20,
+    60
+  );
+  if (limited) return limited;
 
   const url = new URL(ctx.request.url);
   const db = ctx.env.DB;

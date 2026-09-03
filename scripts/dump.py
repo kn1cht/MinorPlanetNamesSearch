@@ -82,6 +82,9 @@ PRAGMA optimize;
         # Append FTS table creation and triggers
         f.write('''
 CREATE VIRTUAL TABLE minor_planets_fts USING fts5(
+    permid,
+    packed_permid,
+    iau_designation,
     name_ascii,
     name_display,
     citation_text,
@@ -92,18 +95,18 @@ CREATE VIRTUAL TABLE minor_planets_fts USING fts5(
     tokenize='trigram'
 );
 CREATE TRIGGER minor_planets_ai AFTER INSERT ON minor_planets BEGIN
-    INSERT INTO minor_planets_fts(rowid, name_ascii, name_display, citation_text, discovery_site, discoverer_text)
-    VALUES (new.rowid, new.name_ascii, new.name_display, new.citation_text, new.discovery_site, new.discoverer_text);
+    INSERT INTO minor_planets_fts(rowid, permid, packed_permid, iau_designation, name_ascii, name_display, citation_text, discovery_site, discoverer_text)
+    VALUES (new.rowid, new.permid, new.packed_permid, new.iau_designation, new.name_ascii, new.name_display, new.citation_text, new.discovery_site, new.discoverer_text);
 END;
 CREATE TRIGGER minor_planets_ad AFTER DELETE ON minor_planets BEGIN
-    INSERT INTO minor_planets_fts(minor_planets_fts, rowid, name_ascii, name_display, citation_text, discovery_site, discoverer_text)
-    VALUES('delete', old.rowid, old.name_ascii, old.name_display, old.citation_text, old.discovery_site, old.discoverer_text);
+    INSERT INTO minor_planets_fts(minor_planets_fts, rowid, permid, packed_permid, iau_designation, name_ascii, name_display, citation_text, discovery_site, discoverer_text)
+    VALUES('delete', old.rowid, old.permid, old.packed_permid, old.iau_designation, old.name_ascii, old.name_display, old.citation_text, old.discovery_site, old.discoverer_text);
 END;
 CREATE TRIGGER minor_planets_au AFTER UPDATE ON minor_planets BEGIN
-    INSERT INTO minor_planets_fts(minor_planets_fts, rowid, name_ascii, name_display, citation_text, discovery_site, discoverer_text)
-    VALUES('delete', old.rowid, old.name_ascii, old.name_display, old.citation_text, old.discovery_site, old.discoverer_text);
-    INSERT INTO minor_planets_fts(rowid, name_ascii, name_display, citation_text, discovery_site, discoverer_text)
-    VALUES (new.rowid, new.name_ascii, new.name_display, new.citation_text, new.discovery_site, new.discoverer_text);
+    INSERT INTO minor_planets_fts(minor_planets_fts, rowid, permid, packed_permid, iau_designation, name_ascii, name_display, citation_text, discovery_site, discoverer_text)
+    VALUES('delete', old.rowid, old.permid, old.packed_permid, old.iau_designation, old.name_ascii, old.name_display, old.citation_text, old.discovery_site, old.discoverer_text);
+    INSERT INTO minor_planets_fts(rowid, permid, packed_permid, iau_designation, name_ascii, name_display, citation_text, discovery_site, discoverer_text)
+    VALUES (new.rowid, new.permid, new.packed_permid, new.iau_designation, new.name_ascii, new.name_display, new.citation_text, new.discovery_site, new.discoverer_text);
 END;
 INSERT INTO minor_planets_fts(minor_planets_fts) VALUES('rebuild');
 ''')

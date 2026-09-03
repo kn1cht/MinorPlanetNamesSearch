@@ -243,6 +243,9 @@ def initialize(connection: sqlite3.Connection) -> None:
 
         CREATE VIRTUAL TABLE IF NOT EXISTS minor_planets_fts
         USING fts5(
+            permid,
+            packed_permid,
+            iau_designation,
             name_ascii,
             name_display,
             citation_text,
@@ -254,9 +257,12 @@ def initialize(connection: sqlite3.Connection) -> None:
         );
 
         CREATE TRIGGER IF NOT EXISTS minor_planets_ai AFTER INSERT ON minor_planets BEGIN
-            INSERT INTO minor_planets_fts(rowid, name_ascii, name_display, citation_text, discovery_site, discoverer_text)
+            INSERT INTO minor_planets_fts(rowid, permid, packed_permid, iau_designation, name_ascii, name_display, citation_text, discovery_site, discoverer_text)
             VALUES (
                 new.rowid,
+                new.permid,
+                COALESCE(new.packed_permid, ''),
+                COALESCE(new.iau_designation, ''),
                 new.name_ascii,
                 new.name_display,
                 COALESCE(new.citation_text, ''),
@@ -266,10 +272,13 @@ def initialize(connection: sqlite3.Connection) -> None:
         END;
 
         CREATE TRIGGER IF NOT EXISTS minor_planets_ad AFTER DELETE ON minor_planets BEGIN
-            INSERT INTO minor_planets_fts(minor_planets_fts, rowid, name_ascii, name_display, citation_text, discovery_site, discoverer_text)
+            INSERT INTO minor_planets_fts(minor_planets_fts, rowid, permid, packed_permid, iau_designation, name_ascii, name_display, citation_text, discovery_site, discoverer_text)
             VALUES(
                 'delete',
                 old.rowid,
+                old.permid,
+                COALESCE(old.packed_permid, ''),
+                COALESCE(old.iau_designation, ''),
                 old.name_ascii,
                 old.name_display,
                 COALESCE(old.citation_text, ''),
@@ -279,19 +288,25 @@ def initialize(connection: sqlite3.Connection) -> None:
         END;
 
         CREATE TRIGGER IF NOT EXISTS minor_planets_au AFTER UPDATE ON minor_planets BEGIN
-            INSERT INTO minor_planets_fts(minor_planets_fts, rowid, name_ascii, name_display, citation_text, discovery_site, discoverer_text)
+            INSERT INTO minor_planets_fts(minor_planets_fts, rowid, permid, packed_permid, iau_designation, name_ascii, name_display, citation_text, discovery_site, discoverer_text)
             VALUES(
                 'delete',
                 old.rowid,
+                old.permid,
+                COALESCE(old.packed_permid, ''),
+                COALESCE(old.iau_designation, ''),
                 old.name_ascii,
                 old.name_display,
                 COALESCE(old.citation_text, ''),
                 COALESCE(old.discovery_site, ''),
                 COALESCE(old.discoverer_text, '')
             );
-            INSERT INTO minor_planets_fts(rowid, name_ascii, name_display, citation_text, discovery_site, discoverer_text)
+            INSERT INTO minor_planets_fts(rowid, permid, packed_permid, iau_designation, name_ascii, name_display, citation_text, discovery_site, discoverer_text)
             VALUES (
                 new.rowid,
+                new.permid,
+                COALESCE(new.packed_permid, ''),
+                COALESCE(new.iau_designation, ''),
                 new.name_ascii,
                 new.name_display,
                 COALESCE(new.citation_text, ''),
@@ -490,7 +505,16 @@ def sync_wgsbn_naming_metadata(connection: sqlite3.Connection) -> dict[str, int]
 
 
 def _ensure_fts_schema(connection: sqlite3.Connection) -> None:
-    expected = {"name_ascii", "name_display", "citation_text", "discovery_site", "discoverer_text"}
+    expected = {
+        "permid",
+        "packed_permid",
+        "iau_designation",
+        "name_ascii",
+        "name_display",
+        "citation_text",
+        "discovery_site",
+        "discoverer_text",
+    }
     rows = connection.execute("PRAGMA table_info(minor_planets_fts)").fetchall()
     existing = {row["name"] for row in rows}
     if expected.issubset(existing):
@@ -505,6 +529,9 @@ def _ensure_fts_schema(connection: sqlite3.Connection) -> None:
 
         CREATE VIRTUAL TABLE minor_planets_fts
         USING fts5(
+            permid,
+            packed_permid,
+            iau_designation,
             name_ascii,
             name_display,
             citation_text,
@@ -515,9 +542,12 @@ def _ensure_fts_schema(connection: sqlite3.Connection) -> None:
             tokenize='trigram'
         );
 
-        INSERT INTO minor_planets_fts(rowid, name_ascii, name_display, citation_text, discovery_site, discoverer_text)
+        INSERT INTO minor_planets_fts(rowid, permid, packed_permid, iau_designation, name_ascii, name_display, citation_text, discovery_site, discoverer_text)
         SELECT
             rowid,
+            permid,
+            COALESCE(packed_permid, ''),
+            COALESCE(iau_designation, ''),
             name_ascii,
             name_display,
             COALESCE(citation_text, ''),
@@ -526,9 +556,12 @@ def _ensure_fts_schema(connection: sqlite3.Connection) -> None:
         FROM minor_planets;
 
         CREATE TRIGGER minor_planets_ai AFTER INSERT ON minor_planets BEGIN
-            INSERT INTO minor_planets_fts(rowid, name_ascii, name_display, citation_text, discovery_site, discoverer_text)
+            INSERT INTO minor_planets_fts(rowid, permid, packed_permid, iau_designation, name_ascii, name_display, citation_text, discovery_site, discoverer_text)
             VALUES (
                 new.rowid,
+                new.permid,
+                COALESCE(new.packed_permid, ''),
+                COALESCE(new.iau_designation, ''),
                 new.name_ascii,
                 new.name_display,
                 COALESCE(new.citation_text, ''),
@@ -538,10 +571,13 @@ def _ensure_fts_schema(connection: sqlite3.Connection) -> None:
         END;
 
         CREATE TRIGGER minor_planets_ad AFTER DELETE ON minor_planets BEGIN
-            INSERT INTO minor_planets_fts(minor_planets_fts, rowid, name_ascii, name_display, citation_text, discovery_site, discoverer_text)
+            INSERT INTO minor_planets_fts(minor_planets_fts, rowid, permid, packed_permid, iau_designation, name_ascii, name_display, citation_text, discovery_site, discoverer_text)
             VALUES(
                 'delete',
                 old.rowid,
+                old.permid,
+                COALESCE(old.packed_permid, ''),
+                COALESCE(old.iau_designation, ''),
                 old.name_ascii,
                 old.name_display,
                 COALESCE(old.citation_text, ''),
@@ -551,19 +587,25 @@ def _ensure_fts_schema(connection: sqlite3.Connection) -> None:
         END;
 
         CREATE TRIGGER minor_planets_au AFTER UPDATE ON minor_planets BEGIN
-            INSERT INTO minor_planets_fts(minor_planets_fts, rowid, name_ascii, name_display, citation_text, discovery_site, discoverer_text)
+            INSERT INTO minor_planets_fts(minor_planets_fts, rowid, permid, packed_permid, iau_designation, name_ascii, name_display, citation_text, discovery_site, discoverer_text)
             VALUES(
                 'delete',
                 old.rowid,
+                old.permid,
+                COALESCE(old.packed_permid, ''),
+                COALESCE(old.iau_designation, ''),
                 old.name_ascii,
                 old.name_display,
                 COALESCE(old.citation_text, ''),
                 COALESCE(old.discovery_site, ''),
                 COALESCE(old.discoverer_text, '')
             );
-            INSERT INTO minor_planets_fts(rowid, name_ascii, name_display, citation_text, discovery_site, discoverer_text)
+            INSERT INTO minor_planets_fts(rowid, permid, packed_permid, iau_designation, name_ascii, name_display, citation_text, discovery_site, discoverer_text)
             VALUES (
                 new.rowid,
+                new.permid,
+                COALESCE(new.packed_permid, ''),
+                COALESCE(new.iau_designation, ''),
                 new.name_ascii,
                 new.name_display,
                 COALESCE(new.citation_text, ''),
@@ -1446,70 +1488,49 @@ def _filters(
 
 def _query_clause(query: str, *, q_target: str = "both") -> tuple[str, list[Any]]:
     like_query = f"%{_escape_like(query)}%"
-    if q_target == "citation":
-        if _use_short_text_search(query):
-            return (
-                "(COALESCE(mp.citation_text, '') LIKE ? ESCAPE '\\' COLLATE NOCASE)",
-                [like_query],
-            )
+
+    # Trigram FTS supports substring search for three or more characters. Keep
+    # the candidate set in the FTS index, then look up only matching rowids in
+    # minor_planets. Combining LIKE with FTS via OR made SQLite scan every
+    # minor_planets row, which is particularly costly for multi-term searches.
+    if not _use_short_text_search(query):
         return (
-            "("
-            "COALESCE(mp.citation_text, '') LIKE ? ESCAPE '\\' COLLATE NOCASE OR "
-            "mp.rowid IN ("
+            "(mp.rowid IN ("
             "SELECT rowid FROM minor_planets_fts WHERE minor_planets_fts MATCH ?"
-            ")"
-            ")",
-            [like_query, _fts_query_for_target(query, q_target)],
+            "))",
+            [_fts_query_for_target(query, q_target)],
+        )
+
+    if q_target == "citation":
+        return (
+            "(COALESCE(mp.citation_text, '') LIKE ? ESCAPE '\\' COLLATE NOCASE)",
+            [like_query],
         )
 
     if q_target == "name":
-        if _use_short_text_search(query):
-            return (
-                "("
-                "mp.permid LIKE ? ESCAPE '\\' OR "
-                "COALESCE(mp.packed_permid, '') LIKE ? ESCAPE '\\' COLLATE NOCASE OR "
-                "COALESCE(mp.iau_designation, '') LIKE ? ESCAPE '\\' COLLATE NOCASE OR "
-                "mp.name_ascii LIKE ? ESCAPE '\\' COLLATE NOCASE OR "
-                "mp.name_display LIKE ? ESCAPE '\\' COLLATE NOCASE"
-                ")",
-                [like_query] * 5,
-            )
-        return (
-            "("
-            "mp.permid LIKE ? ESCAPE '\\' OR "
-            "COALESCE(mp.packed_permid, '') LIKE ? ESCAPE '\\' COLLATE NOCASE OR "
-            "COALESCE(mp.iau_designation, '') LIKE ? ESCAPE '\\' COLLATE NOCASE OR "
-            "mp.rowid IN ("
-            "SELECT rowid FROM minor_planets_fts WHERE minor_planets_fts MATCH ?"
-            ")"
-            ")",
-            [like_query, like_query, like_query, _fts_query_for_target(query, q_target)],
-        )
-
-    if _use_short_text_search(query):
         return (
             "("
             "mp.permid LIKE ? ESCAPE '\\' OR "
             "COALESCE(mp.packed_permid, '') LIKE ? ESCAPE '\\' COLLATE NOCASE OR "
             "COALESCE(mp.iau_designation, '') LIKE ? ESCAPE '\\' COLLATE NOCASE OR "
             "mp.name_ascii LIKE ? ESCAPE '\\' COLLATE NOCASE OR "
-            "mp.name_display LIKE ? ESCAPE '\\' COLLATE NOCASE OR "
-            "COALESCE(mp.citation_text, '') LIKE ? ESCAPE '\\' COLLATE NOCASE OR "
-            "COALESCE(mp.discovery_site, '') LIKE ? ESCAPE '\\' COLLATE NOCASE OR "
-            "COALESCE(mp.discoverer_text, '') LIKE ? ESCAPE '\\' COLLATE NOCASE"
+            "mp.name_display LIKE ? ESCAPE '\\' COLLATE NOCASE"
             ")",
-            [like_query] * 8,
+            [like_query] * 5,
         )
+
     return (
         "("
         "mp.permid LIKE ? ESCAPE '\\' OR "
         "COALESCE(mp.packed_permid, '') LIKE ? ESCAPE '\\' COLLATE NOCASE OR "
         "COALESCE(mp.iau_designation, '') LIKE ? ESCAPE '\\' COLLATE NOCASE OR "
-        "mp.rowid IN ("
-        "SELECT rowid FROM minor_planets_fts WHERE minor_planets_fts MATCH ?"
-        ")"
+        "mp.name_ascii LIKE ? ESCAPE '\\' COLLATE NOCASE OR "
+        "mp.name_display LIKE ? ESCAPE '\\' COLLATE NOCASE OR "
+        "COALESCE(mp.citation_text, '') LIKE ? ESCAPE '\\' COLLATE NOCASE OR "
+        "COALESCE(mp.discovery_site, '') LIKE ? ESCAPE '\\' COLLATE NOCASE OR "
+        "COALESCE(mp.discoverer_text, '') LIKE ? ESCAPE '\\' COLLATE NOCASE"
         ")",
-        [like_query, like_query, like_query, _fts_query_for_target(query, q_target)],
+        [like_query] * 8,
     )
 
 
@@ -1559,7 +1580,15 @@ def _fts_query_for_target(q: str, q_target: str) -> str:
     base = _fts_query(q)
     normalized_q_target = _normalize_q_target(q_target)
     if normalized_q_target == "name":
-        return f"name_ascii:{base} OR name_display:{base}"
+        return " OR ".join(
+            [
+                f"permid:{base}",
+                f"packed_permid:{base}",
+                f"iau_designation:{base}",
+                f"name_ascii:{base}",
+                f"name_display:{base}",
+            ]
+        )
     if normalized_q_target == "citation":
         return f"citation_text:{base}"
     return base

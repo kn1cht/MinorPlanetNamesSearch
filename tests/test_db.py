@@ -37,6 +37,38 @@ class DatabaseTests(unittest.TestCase):
             "minor_planets_is_pha_permid",
         }.issubset(index_names))
 
+    def test_initialize_indexes_identifiers_in_fts(self):
+        fts_columns = {
+            row["name"]
+            for row in self.connection.execute(
+                "PRAGMA table_info(minor_planets_fts)"
+            )
+        }
+        self.assertTrue({
+            "permid",
+            "packed_permid",
+            "iau_designation",
+            "name_ascii",
+            "name_display",
+            "citation_text",
+        }.issubset(fts_columns))
+
+    def test_long_query_clause_uses_fts_without_like_fallback(self):
+        clause, params = db._query_clause("Charlemagne", q_target="both")
+        self.assertIn("minor_planets_fts MATCH ?", clause)
+        self.assertNotIn("LIKE", clause)
+        self.assertEqual(len(params), 1)
+
+        plan = self.connection.execute(
+            "EXPLAIN QUERY PLAN "
+            "SELECT mp.permid FROM minor_planets mp "
+            f"WHERE {clause}",
+            params,
+        ).fetchall()
+        details = [row[3] for row in plan]
+        self.assertTrue(any("minor_planets_fts" in detail for detail in details))
+        self.assertFalse(any("SCAN mp" in detail for detail in details))
+
     def test_search_by_name(self):
         result = db.search(self.connection, q="Aachen")
         self.assertEqual(result["total"], 1)

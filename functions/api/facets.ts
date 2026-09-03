@@ -1,9 +1,17 @@
 import { Env } from "../types";
-import { d1CacheHeaders, jsonResponse, parseFilterArgs, buildFilters } from "../db";
+import { d1CacheHeaders, jsonResponse, parseFilterArgs, buildFilters, rateLimitResponse } from "../db";
 
 export const onRequestGet: PagesFunction<Env> = async (ctx) => {
   const cached = await caches.default.match(ctx.request);
   if (cached) return cached;
+
+  const limited = await rateLimitResponse(
+    ctx.request,
+    "facets",
+    12,
+    60
+  );
+  if (limited) return limited;
 
   const url = new URL(ctx.request.url);
   const db = ctx.env.DB;

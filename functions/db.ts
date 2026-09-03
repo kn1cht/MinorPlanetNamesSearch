@@ -86,7 +86,15 @@ function ftsQuery(q: string): string {
 
 function ftsQueryForTarget(q: string, qTarget: string): string {
   const base = ftsQuery(q);
-  if (qTarget === "name") return `name_ascii:${base} OR name_display:${base}`;
+  if (qTarget === "name") {
+    return [
+      `permid:${base}`,
+      `packed_permid:${base}`,
+      `iau_designation:${base}`,
+      `name_ascii:${base}`,
+      `name_display:${base}`,
+    ].join(" OR ");
+  }
   if (qTarget === "citation") return `citation_text:${base}`;
   return base;
 }
@@ -130,70 +138,50 @@ function queryClause(
 ): [string, (string | number)[]] {
   const likeQuery = `%${escapeLike(query)}%`;
 
-  if (qTarget === "citation") {
-    if (useShortTextSearch(query)) {
-      return [
-        "(COALESCE(mp.citation_text, '') LIKE ? ESCAPE '\\' COLLATE NOCASE)",
-        [likeQuery],
-      ];
-    }
+  // Trigram FTS supports substring search for three or more characters. Keep
+  // the candidate set in the FTS index, then look up only matching rowids in
+  // minor_planets. Combining LIKE with FTS via OR made SQLite scan every
+  // minor_planets row, which is particularly costly for multi-term searches.
+  if (!useShortTextSearch(query)) {
     return [
-      "(" +
-        "COALESCE(mp.citation_text, '') LIKE ? ESCAPE '\\' COLLATE NOCASE OR " +
-        "mp.rowid IN (SELECT rowid FROM minor_planets_fts WHERE minor_planets_fts MATCH ?)" +
-        ")",
-      [likeQuery, ftsQueryForTarget(query, qTarget)],
+      "(mp.rowid IN (SELECT rowid FROM minor_planets_fts WHERE minor_planets_fts MATCH ?))",
+      [ftsQueryForTarget(query, qTarget)],
+    ];
+  }
+
+  if (qTarget === "citation") {
+    return [
+      "(COALESCE(mp.citation_text, '') LIKE ? ESCAPE '\\' COLLATE NOCASE)",
+      [likeQuery],
     ];
   }
 
   if (qTarget === "name") {
-    if (useShortTextSearch(query)) {
-      return [
-        "(" +
-          "mp.permid LIKE ? ESCAPE '\\' OR " +
-          "COALESCE(mp.packed_permid, '') LIKE ? ESCAPE '\\' COLLATE NOCASE OR " +
-          "COALESCE(mp.iau_designation, '') LIKE ? ESCAPE '\\' COLLATE NOCASE OR " +
-          "mp.name_ascii LIKE ? ESCAPE '\\' COLLATE NOCASE OR " +
-          "mp.name_display LIKE ? ESCAPE '\\' COLLATE NOCASE" +
-          ")",
-        Array(5).fill(likeQuery),
-      ];
-    }
-    return [
-      "(" +
-        "mp.permid LIKE ? ESCAPE '\\' OR " +
-        "COALESCE(mp.packed_permid, '') LIKE ? ESCAPE '\\' COLLATE NOCASE OR " +
-        "COALESCE(mp.iau_designation, '') LIKE ? ESCAPE '\\' COLLATE NOCASE OR " +
-        "mp.rowid IN (SELECT rowid FROM minor_planets_fts WHERE minor_planets_fts MATCH ?)" +
-        ")",
-      [likeQuery, likeQuery, likeQuery, ftsQueryForTarget(query, qTarget)],
-    ];
-  }
-
-  // both
-  if (useShortTextSearch(query)) {
     return [
       "(" +
         "mp.permid LIKE ? ESCAPE '\\' OR " +
         "COALESCE(mp.packed_permid, '') LIKE ? ESCAPE '\\' COLLATE NOCASE OR " +
         "COALESCE(mp.iau_designation, '') LIKE ? ESCAPE '\\' COLLATE NOCASE OR " +
         "mp.name_ascii LIKE ? ESCAPE '\\' COLLATE NOCASE OR " +
-        "mp.name_display LIKE ? ESCAPE '\\' COLLATE NOCASE OR " +
-        "COALESCE(mp.citation_text, '') LIKE ? ESCAPE '\\' COLLATE NOCASE OR " +
-        "COALESCE(mp.discovery_site, '') LIKE ? ESCAPE '\\' COLLATE NOCASE OR " +
-        "COALESCE(mp.discoverer_text, '') LIKE ? ESCAPE '\\' COLLATE NOCASE" +
+        "mp.name_display LIKE ? ESCAPE '\\' COLLATE NOCASE" +
         ")",
-      Array(8).fill(likeQuery),
+      Array(5).fill(likeQuery),
     ];
   }
+
+  // both
   return [
     "(" +
       "mp.permid LIKE ? ESCAPE '\\' OR " +
       "COALESCE(mp.packed_permid, '') LIKE ? ESCAPE '\\' COLLATE NOCASE OR " +
       "COALESCE(mp.iau_designation, '') LIKE ? ESCAPE '\\' COLLATE NOCASE OR " +
-      "mp.rowid IN (SELECT rowid FROM minor_planets_fts WHERE minor_planets_fts MATCH ?)" +
+      "mp.name_ascii LIKE ? ESCAPE '\\' COLLATE NOCASE OR " +
+      "mp.name_display LIKE ? ESCAPE '\\' COLLATE NOCASE OR " +
+      "COALESCE(mp.citation_text, '') LIKE ? ESCAPE '\\' COLLATE NOCASE OR " +
+      "COALESCE(mp.discovery_site, '') LIKE ? ESCAPE '\\' COLLATE NOCASE OR " +
+      "COALESCE(mp.discoverer_text, '') LIKE ? ESCAPE '\\' COLLATE NOCASE" +
       ")",
-    [likeQuery, likeQuery, likeQuery, ftsQueryForTarget(query, qTarget)],
+    Array(8).fill(likeQuery),
   ];
 }
 
@@ -456,6 +444,78 @@ export function d1CacheHeaders(): Record<string, string> {
   return {
     "Cache-Control": `public, max-age=0, s-maxage=${D1_RESPONSE_CACHE_SECONDS}`,
   };
+}
+
+/**
+ * Stop uncached, client-specific searches before they reach D1. Pages Functions
+ * do not support the Workers Rate Limiting binding, so this keeps a short,
+ * best-effort counter in the Cache API instead. The counter is local to a
+ * Cloudflare data center and non-atomic, which is sufficient to damp repeated
+ * requests but is not intended as billing-grade accounting.
+ */
+export async function rateLimitResponse(
+  request: Request,
+  route: string,
+  maxRequests: number,
+  periodSeconds: number
+): Promise<Response | null> {
+  const clientIp = request.headers.get("CF-Connecting-IP") ?? "unknown-client";
+  try {
+    const cache = caches.default;
+    const cacheKey = await rateLimitCacheKey(request, route, clientIp);
+    const now = Date.now();
+    const cached = await cache.match(cacheKey);
+    const current = cached ? await cached.json<RateLimitWindow>() : null;
+    const currentWindow = current
+      && current.windowStartedAt + periodSeconds * 1000 > now;
+    const windowStartedAt = currentWindow ? current.windowStartedAt : now;
+    const used = currentWindow ? current.used : 0;
+    const expiresAt = windowStartedAt + periodSeconds * 1000;
+
+    if (used >= maxRequests && expiresAt > now) {
+      const retryAfter = Math.max(1, Math.ceil((expiresAt - now) / 1000));
+      return jsonResponse(
+        { error: "Too many search requests. Please wait and try again." },
+        429,
+        { "Cache-Control": "private, no-store", "Retry-After": String(retryAfter) }
+      );
+    }
+
+    const remainingSeconds = Math.max(1, Math.ceil((expiresAt - now) / 1000));
+    await cache.put(
+      cacheKey,
+      new Response(JSON.stringify({ windowStartedAt, used: used + 1 } satisfies RateLimitWindow), {
+        headers: { "Cache-Control": `public, max-age=${remainingSeconds}` },
+      })
+    );
+    return null;
+  } catch (error) {
+    // Failing closed prevents a cache outage from turning into unbounded D1 use.
+    console.error("rate limiter unavailable", error);
+    return jsonResponse(
+      { error: "Search protection is temporarily unavailable. Please retry shortly." },
+      503,
+      { "Cache-Control": "private, no-store", "Retry-After": "60" }
+    );
+  }
+
+}
+
+interface RateLimitWindow {
+  windowStartedAt: number;
+  used: number;
+}
+
+async function rateLimitCacheKey(
+  request: Request,
+  route: string,
+  clientIp: string
+): Promise<Request> {
+  const payload = new TextEncoder().encode(`${route}:${clientIp}`);
+  const digest = await crypto.subtle.digest("SHA-256", payload);
+  const key = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+  const url = new URL(request.url);
+  return new Request(`${url.origin}/__internal-rate-limit/${route}/${key}`);
 }
 
 export function parseFilterArgs(url: URL): FilterArgs {
