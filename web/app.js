@@ -441,7 +441,7 @@ function renderResults(items) {
     els.results.innerHTML = `<div class="empty">${i18next.t("app.result_summary_zero")}</div>`;
     els.resultSummary.textContent = i18next.t("app.result_summary_zero");
     els.pageLabel.textContent = "1 / 1";
-    updatePagerButtons(1);
+    updatePager();
     return;
   }
 
