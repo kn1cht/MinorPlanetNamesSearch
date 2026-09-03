@@ -756,7 +756,6 @@ function renderPersonFacetSection(roleFacets, genderFacet) {
           <div class="detail-facet-row">
             <span class="detail-facet-label">${escapeHtml(label)}</span>
             <span class="badge citation">${escapeHtml(facet.value)}</span>
-            ${facet.evidence_text ? `<p>${i18next.t("detail.evidence")}: ${escapeHtml(facet.evidence_text)}</p>` : ""}
           </div>
         `).join("")}
       </div>
@@ -773,10 +772,7 @@ function renderDetailBadge(category) {
 
 function renderDetailFacetBadge(facet) {
   const prefix = facet.kind === "person_role" ? "Role" : "Gender";
-  const title = [facet.evidence_text, facet.source, facet.confidence != null ? `confidence ${facet.confidence}` : ""]
-    .filter(Boolean)
-    .join(" · ");
-  return `<span class="badge citation"${title ? ` title="${escapeHtml(title)}"` : ""}>${prefix}: ${escapeHtml(facet.value)}</span>`;
+  return `<span class="badge citation">${prefix}: ${escapeHtml(facet.value)}</span>`;
 }
 
 /* ============================================================
