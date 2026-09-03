@@ -750,7 +750,7 @@ function renderPersonFacetSection(roleFacets, genderFacet) {
   ];
   return `
     <section class="detail-section">
-      <h3>${i18next.t("detail.person_facets")}</h3>
+      <h3>${i18next.t("detail.person_details")}</h3>
       <div class="detail-facet-list">
         ${values.map(({ label, facet }) => `
           <div class="detail-facet-row">
