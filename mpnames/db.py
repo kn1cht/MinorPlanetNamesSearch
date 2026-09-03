@@ -324,17 +324,6 @@ def initialize(connection: sqlite3.Connection) -> None:
     connection.commit()
 
 
-def reset_database(connection: sqlite3.Connection) -> None:
-    """Remove all locally stored ingest data."""
-    connection.execute("DELETE FROM classification_assignments")
-    connection.execute("DELETE FROM classification_jobs")
-    connection.execute("DELETE FROM minor_planets")
-    connection.execute("DELETE FROM discovery_facets")
-    connection.execute("DELETE FROM citation_facets")
-    connection.execute("DELETE FROM identifier_cache")
-    connection.execute("DELETE FROM naming_publications")
-    connection.execute("DELETE FROM wgsbn_bulletins")
-    connection.execute("DELETE FROM ingest_runs")
 
 
 def _ensure_minor_planet_columns(connection: sqlite3.Connection) -> None:
@@ -438,21 +427,6 @@ def replace_wgsbn_bulletin(
     return len(unique_namings)
 
 
-def purge_withdrawn_wgsbn_namings(connection: sqlite3.Connection) -> dict[str, int]:
-    """Remove names explicitly withdrawn by later WGSBN Bulletin errata."""
-    permids = sorted(WITHDRAWN_NAMING_PERMIDS)
-    placeholders = ", ".join("?" for _ in permids)
-    publication_count = connection.execute(
-        f"SELECT COUNT(*) AS c FROM naming_publications WHERE permid IN ({placeholders})",
-        permids,
-    ).fetchone()["c"]
-    object_count = connection.execute(
-        f"SELECT COUNT(*) AS c FROM minor_planets WHERE permid IN ({placeholders})",
-        permids,
-    ).fetchone()["c"]
-    connection.execute(f"DELETE FROM naming_publications WHERE permid IN ({placeholders})", permids)
-    connection.execute(f"DELETE FROM minor_planets WHERE permid IN ({placeholders})", permids)
-    return {"minor_planets": object_count, "naming_publications": publication_count}
 
 
 def sync_wgsbn_naming_metadata(connection: sqlite3.Connection) -> dict[str, int]:

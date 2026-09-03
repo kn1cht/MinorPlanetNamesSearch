@@ -41,7 +41,7 @@ from .settings import (
 from .wgsbn import parse_wgsbn_archive, parse_wgsbn_namings, wgsbn_volume_year
 
 
-INGEST_MODES = {"add", "update", "reset", "repair"}
+INGEST_MODES = {"add", "update", "repair"}
 
 
 def ingest(
@@ -111,8 +111,6 @@ def ingest(
         "naming_metadata_missing": 0,
     }
     next_write_index = 0
-    reset_done = False
-
     def ensure_job() -> dict[str, Any]:
         nonlocal job
         if job is None:
@@ -125,14 +123,11 @@ def ingest(
         return job
 
     def write_ready_records(upto_index: int, current_orbits: dict[str, OrbitRecord] | None = None) -> None:
-        nonlocal next_write_index, reset_done
+        nonlocal next_write_index
         upto_index = min(max(upto_index, next_write_index), len(selected_names))
         if upto_index == next_write_index:
             return
         orbit_lookup = current_orbits if current_orbits is not None else orbits
-        if mode == "reset" and not reset_done:
-            db.reset_database(connection)
-            reset_done = True
         current_job = ensure_job()
         for zero_based_index in range(next_write_index, upto_index):
             record = selected_names[zero_based_index]
@@ -192,9 +187,6 @@ def ingest(
         )
         stats["orbit_records"] = _unique_orbit_count(orbits)
         progress.message(f"Fetched {_unique_orbit_count(orbits)} orbit records")
-    if mode == "reset" and selected_names and not reset_done:
-        db.reset_database(connection)
-        reset_done = True
     write_ready_records(len(selected_names))
     if job is not None:
         db.finish_classification_job(connection, job["job_id"], "completed")
@@ -647,9 +639,7 @@ def _select_names_for_mode(
     if limit is not None and limit < 0:
         raise ValueError("limit must be greater than or equal to zero")
 
-    if mode == "reset":
-        candidates = names
-    elif mode == "update":
+    if mode == "update":
         candidates = names
     elif mode == "add":
         existing = db.existing_permids(connection)

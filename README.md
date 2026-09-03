@@ -35,7 +35,6 @@ Ingest modes:
 
 - `add` default: fetch only named objects that are not already in the DB.
 - `update`: fetch existing objects too, but skip DB writes when nothing changed.
-- `reset`: clear the local DB, then fetch up to `--limit` objects.
 - `repair`: fetch objects missing from the DB, plus existing records with missing identifier, orbit, or discovery fields. It also retries WGSBN metadata synchronization.
 
 Discovery date, observatory/site, and discoverer information is read from
@@ -61,12 +60,6 @@ than automatically promoting every transient MPC lag):
 
 ```powershell
 python -m mpnames backfill-wgsbn-only --permid <permanent-number>
-```
-
-To apply known WGSBN withdrawal errata to an existing database:
-
-```powershell
-python -m mpnames purge-withdrawn-wgsbn
 ```
 
 For a full local add run, omit `--limit`. Identifier API requests are batched at

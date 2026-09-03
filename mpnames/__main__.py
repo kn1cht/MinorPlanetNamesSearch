@@ -105,10 +105,6 @@ def main(argv: list[str] | None = None) -> int:
     wgsbn_only_parser.add_argument("--think", action="store_true", default=False)
     wgsbn_only_parser.add_argument("--quiet", action="store_true", help="Hide progress output")
 
-    subparsers.add_parser(
-        "purge-withdrawn-wgsbn",
-        help="Remove names withdrawn by later WGSBN Bulletin errata",
-    ).add_argument("--db", default=str(db.DEFAULT_DB))
 
     serve_parser = subparsers.add_parser("serve", help="Run the local Web UI and API")
     serve_parser.add_argument("--db", default=str(db.DEFAULT_DB))
@@ -217,20 +213,6 @@ def main(argv: list[str] | None = None) -> int:
             f"WGSBN-only backfill: inserted {result['inserted']}, updated {result['updated']}, unchanged {result['unchanged']}, "
             f"missing {result['missing']} of {result['records']} requested; "
             f"classifier={result['classifier']}."
-        )
-        return 0
-
-    if args.command == "purge-withdrawn-wgsbn":
-        connection = db.connect(Path(args.db))
-        try:
-            db.initialize(connection)
-            result = db.purge_withdrawn_wgsbn_namings(connection)
-            connection.commit()
-        finally:
-            connection.close()
-        print(
-            f"Removed {result['minor_planets']} withdrawn minor-planet records and "
-            f"{result['naming_publications']} WGSBN publication records from {args.db}."
         )
         return 0
 

@@ -81,19 +81,6 @@ class IngestModeTests(unittest.TestCase):
         self.assertEqual(result["unchanged"], 1)
         self.assertEqual(result["updated"], 0)
 
-    def test_reset_mode_clears_previous_records(self):
-        self._upsert("99")
-
-        def fake_identifiers(names, **kwargs):
-            return {record.name_ascii: _identifier(record.permid, record.name_ascii) for record in names}
-
-        with self._patched_sources(_records("1", "2"), fake_identifiers):
-            result = ingest(self.db_path, mode="reset", limit=1, classifier_mode="rules", wgsbn_sync=False)
-
-        self.assertEqual(result["selected_records"], 1)
-        self.assertEqual(result["inserted"], 1)
-        self.assertEqual(self._permids(), ["1"])
-
     def test_repair_mode_fetches_incomplete_and_new_records(self):
         self._upsert("1")
         self._mark_complete("1")
