@@ -1046,20 +1046,20 @@ mark.hl {
 }
 .side-tab {
   height: 32px;
-  padding: 0 14px;
-  border: 1px solid var(--line);
-  border-radius: 999px;
+  padding: 0 4px;
+  border: none;
+  border-radius: 0;
   background: transparent;
   color: var(--muted);
   font-size: 12px;
-  font-weight: 600;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
   cursor: pointer;
-  transition: background 0.15s, color 0.15s, border-color 0.15s;
+  transition: color 0.15s;
 }
 .side-tab.active {
-  background: var(--accent-dim);
-  border-color: var(--accent-focus-border);
-  color: var(--accent-strong);
+  color: var(--muted);
 }
 .close-side-panel {
   width: 32px; height: 32px;
