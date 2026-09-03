@@ -8,10 +8,13 @@
     "deploy": "npm run build && wrangler pages deploy ./dist",
     "push-db": "node scripts/push-db.mjs",
     "push-db:local": "node scripts/push-db.mjs --local",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "secretlint": "secretlint \"**/*\""
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20260708.1",
+    "@secretlint/secretlint-rule-preset-recommend": "^13.0.5",
+    "secretlint": "^13.0.5",
     "typescript": "^5.8.3",
     "wrangler": "^4.110.0"
   }
