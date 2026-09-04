@@ -53,6 +53,17 @@ class DatabaseTests(unittest.TestCase):
             "citation_text",
         }.issubset(fts_columns))
 
+    def test_init_sample_materializes_initial_view_statistics(self):
+        snapshot = db.dataset_stats_snapshot(self.connection)
+        initial_search = db.dataset_initial_search_snapshot(self.connection)
+
+        self.assertEqual(snapshot, db.stats(self.connection))
+        self.assertEqual(initial_search, db.search(self.connection, sort="alpha", direction="asc"))
+        self.assertEqual(
+            self.connection.execute("SELECT COUNT(*) AS c FROM dataset_stats").fetchone()["c"],
+            1,
+        )
+
     def test_long_query_clause_uses_fts_without_like_fallback(self):
         clause, params = db._query_clause("Charlemagne", q_target="both")
         self.assertIn("minor_planets_fts MATCH ?", clause)

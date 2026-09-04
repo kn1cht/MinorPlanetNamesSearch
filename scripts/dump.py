@@ -1,7 +1,28 @@
 import sqlite3
 import sys
+from pathlib import Path
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from mpnames import db as mpnames_db
+
+
+def refresh_public_stats(db_path):
+    """Store the initial-view payload immediately before exporting a D1 snapshot."""
+    connection = mpnames_db.connect(db_path)
+    try:
+        mpnames_db.initialize(connection)
+        mpnames_db.refresh_dataset_stats(connection)
+        connection.commit()
+    finally:
+        connection.close()
+
 
 def dump_sorted(db_path, out_path):
+    refresh_public_stats(db_path)
     schema_lines = []
     insert_lines = []
     trigger_lines = []
@@ -59,6 +80,7 @@ DROP TABLE IF EXISTS naming_publications;
 DROP TABLE IF EXISTS wgsbn_bulletins;
 DROP TABLE IF EXISTS identifier_cache;
 DROP TABLE IF EXISTS ingest_runs;
+DROP TABLE IF EXISTS dataset_stats;
 DROP TABLE IF EXISTS minor_planets;
 ''')
         for l in schema_lines: f.write(l + '\n')

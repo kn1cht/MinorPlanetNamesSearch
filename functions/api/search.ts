@@ -28,6 +28,26 @@ export const onRequestGet: PagesFunction<Env> = async (ctx) => {
   const url = new URL(ctx.request.url);
   const db = ctx.env.DB;
 
+  if (isInitialSearch(url)) {
+    try {
+      const snapshot = await db.prepare(
+        "SELECT initial_search_json FROM dataset_stats WHERE cache_key = 'base'"
+      ).first<{ initial_search_json: string }>();
+      if (snapshot) {
+        const parsed: unknown = JSON.parse(snapshot.initial_search_json);
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+          const response = jsonResponse(parsed, 200, d1CacheHeaders());
+          ctx.waitUntil(caches.default.put(ctx.request, response.clone()));
+          return response;
+        }
+      }
+    } catch (error) {
+      // An older D1 import can briefly lack the materialized table during a
+      // rolling deploy. Fall through to the established dynamic query.
+      console.warn("initial search snapshot unavailable; querying D1", error);
+    }
+  }
+
   const filterArgs = parseFilterArgs(url);
   const sort = param(url, "sort", "alpha");
   const direction = param(url, "direction", "asc");
@@ -128,3 +148,24 @@ export const onRequestGet: PagesFunction<Env> = async (ctx) => {
   ctx.waitUntil(caches.default.put(ctx.request, response.clone()));
   return response;
 };
+
+function isInitialSearch(url: URL): boolean {
+  const noFilter = [
+    "q",
+    "orbit",
+    "citation_category",
+    "person_role",
+    "gender",
+    "discoverer",
+    "observatory",
+    "flag",
+  ].every((name) => url.searchParams.getAll(name).every((value) => value === ""));
+
+  return noFilter
+    && param(url, "q_mode", "and") === "and"
+    && param(url, "q_target", "both") === "both"
+    && param(url, "sort", "alpha") === "alpha"
+    && param(url, "direction", "asc") === "asc"
+    && intParam(url, "limit", 50) === 50
+    && intParam(url, "offset", 0) === 0;
+}

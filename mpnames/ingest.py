@@ -204,6 +204,7 @@ def ingest(
         stats["naming_metadata_updated"] = naming_metadata["updated"]
         stats["naming_metadata_unchanged"] = naming_metadata["unchanged"]
         stats["naming_metadata_missing"] = naming_metadata["missing"]
+        db.refresh_dataset_stats(connection)
         connection.commit()
     finally:
         connection.close()
@@ -255,6 +256,7 @@ def init_sample(
         db.assign_classification_job(connection, record.permid, "citation_category", job["job_id"])
         db.assign_classification_job(connection, record.permid, "person_facet", job["job_id"])
     db.finish_classification_job(connection, job["job_id"], "completed")
+    db.refresh_dataset_stats(connection)
     connection.commit()
     connection.close()
     return {"records": len(names), "fixture_dir": str(fixture_dir)}
@@ -338,6 +340,7 @@ def reclassify_existing(
             if _should_report_item(index, len(rows)):
                 progress.step("Reclassify", index, len(rows))
         db.finish_classification_job(connection, job["job_id"], "completed")
+        db.refresh_dataset_stats(connection)
     except Exception:
         db.finish_classification_job(connection, job["job_id"], "failed")
         connection.commit()
@@ -409,6 +412,7 @@ def classify_person_facets_existing(
             if _should_report_item(index, len(rows)):
                 progress.step("Person facet classify", index, len(rows), detail=f"updated={updated}")
         db.finish_classification_job(connection, job["job_id"], "completed")
+        db.refresh_dataset_stats(connection)
     except Exception:
         db.finish_classification_job(connection, job["job_id"], "failed")
         connection.commit()
@@ -575,6 +579,7 @@ def backfill_wgsbn_only(
         progress.step("WGSBN-only backfill", index, len(normalized_permids), detail=permid)
 
     db.finish_classification_job(connection, job["job_id"], "completed")
+    db.refresh_dataset_stats(connection)
     connection.commit()
     connection.close()
     return {

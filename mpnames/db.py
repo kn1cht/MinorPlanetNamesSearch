@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import html
+import json
 import re
 import sqlite3
 from collections import Counter
@@ -126,6 +127,16 @@ def initialize(connection: sqlite3.Connection) -> None:
             rms_residual REAL,
             flags_hex TEXT,
             updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+
+        -- The public initial view always uses the same aggregate data for one
+        -- imported dataset.  Materialize it during ingest so the Pages API
+        -- does not need to scan the source tables on every cache miss.
+        CREATE TABLE IF NOT EXISTS dataset_stats (
+            cache_key TEXT PRIMARY KEY CHECK (cache_key = 'base'),
+            payload_json TEXT NOT NULL,
+            initial_search_json TEXT NOT NULL,
+            refreshed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
         );
 
         CREATE TABLE IF NOT EXISTS categories (
@@ -317,6 +328,7 @@ def initialize(connection: sqlite3.Connection) -> None:
         """
     )
     _ensure_minor_planet_columns(connection)
+    _ensure_dataset_stats_columns(connection)
     _ensure_wgsbn_publication_year_columns(connection)
     _ensure_fts_schema(connection)
     _migrate_deprecated_citation_categories(connection)
@@ -345,6 +357,17 @@ def _ensure_minor_planet_columns(connection: sqlite3.Connection) -> None:
     for name, column_type in required.items():
         if name not in existing:
             connection.execute(f"ALTER TABLE minor_planets ADD COLUMN {name} {column_type}")
+
+
+def _ensure_dataset_stats_columns(connection: sqlite3.Connection) -> None:
+    existing = {
+        row["name"]
+        for row in connection.execute("PRAGMA table_info(dataset_stats)").fetchall()
+    }
+    if "initial_search_json" not in existing:
+        connection.execute(
+            "ALTER TABLE dataset_stats ADD COLUMN initial_search_json TEXT NOT NULL DEFAULT '{}'"
+        )
 
 
 def _ensure_wgsbn_publication_year_columns(connection: sqlite3.Connection) -> None:
@@ -1130,6 +1153,12 @@ def get_object(connection: sqlite3.Connection, permid: str) -> dict[str, Any] | 
 
 
 def stats(connection: sqlite3.Connection) -> dict[str, Any]:
+    """Calculate the current base statistics from the source tables.
+
+    This intentionally remains a live calculation for local maintenance code.
+    ``refresh_dataset_stats`` stores the same result after a completed ingest,
+    and the public APIs read that materialized payload instead.
+    """
     total = connection.execute("SELECT COUNT(*) AS c FROM minor_planets").fetchone()["c"]
     latest = connection.execute("SELECT MAX(updated_at) AS latest FROM minor_planets").fetchone()["latest"]
     orbit_rows = connection.execute(
@@ -1171,6 +1200,55 @@ def stats(connection: sqlite3.Connection) -> dict[str, Any]:
         "observatories": [dict(row) for row in observatory_rows],
         "flags": flag_rows,
     }
+
+
+def refresh_dataset_stats(connection: sqlite3.Connection) -> dict[str, Any]:
+    """Materialize the public initial-view payloads for the current dataset."""
+    payload = stats(connection)
+    initial_search = search(connection, sort="alpha", direction="asc", limit=50, offset=0)
+    connection.execute(
+        """
+        INSERT INTO dataset_stats (cache_key, payload_json, initial_search_json, refreshed_at)
+        VALUES ('base', ?, ?, CURRENT_TIMESTAMP)
+        ON CONFLICT(cache_key) DO UPDATE SET
+            payload_json = excluded.payload_json,
+            initial_search_json = excluded.initial_search_json,
+            refreshed_at = excluded.refreshed_at
+        """,
+        (
+            json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
+            json.dumps(initial_search, ensure_ascii=False, separators=(",", ":")),
+        ),
+    )
+    return payload
+
+
+def dataset_stats_snapshot(connection: sqlite3.Connection) -> dict[str, Any] | None:
+    """Return the materialized public statistics, if this DB has one."""
+    row = connection.execute(
+        "SELECT payload_json FROM dataset_stats WHERE cache_key = 'base'"
+    ).fetchone()
+    if row is None:
+        return None
+    try:
+        payload = json.loads(row["payload_json"])
+    except (TypeError, json.JSONDecodeError):
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def dataset_initial_search_snapshot(connection: sqlite3.Connection) -> dict[str, Any] | None:
+    """Return the materialized all-object initial search page, if available."""
+    row = connection.execute(
+        "SELECT initial_search_json FROM dataset_stats WHERE cache_key = 'base'"
+    ).fetchone()
+    if row is None:
+        return None
+    try:
+        payload = json.loads(row["initial_search_json"])
+    except (TypeError, json.JSONDecodeError):
+        return None
+    return payload if isinstance(payload, dict) else None
 
 
 def wordcloud(

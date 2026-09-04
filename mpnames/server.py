@@ -44,27 +44,35 @@ class Handler(BaseHTTPRequestHandler):
         db.initialize(connection)
         try:
             if path == "/api/stats":
-                self._json(db.stats(connection))
+                self._json(db.dataset_stats_snapshot(connection) or db.stats(connection))
             elif path == "/api/search":
-                self._json(
-                    db.search(
-                        connection,
-                        q=_params(query, "q"),
-                        q_mode=_param(query, "q_mode", "and"),
-                        q_target=_param(query, "q_target", "both"),
-                        orbit=_params(query, "orbit"),
-                        citation_category=_params(query, "citation_category"),
-                        person_role=_params(query, "person_role"),
-                        gender=_params(query, "gender"),
-                        discoverer=_params(query, "discoverer"),
-                        observatory=_params(query, "observatory"),
-                        flag=_params(query, "flag"),
-                        sort=_param(query, "sort", "number"),
-                        direction=_param(query, "direction", "asc"),
-                        limit=_int_param(query, "limit", 50),
-                        offset=_int_param(query, "offset", 0),
-                    )
+                initial_search = (
+                    db.dataset_initial_search_snapshot(connection)
+                    if _is_initial_search(query)
+                    else None
                 )
+                if initial_search is not None:
+                    self._json(initial_search)
+                else:
+                    self._json(
+                        db.search(
+                            connection,
+                            q=_params(query, "q"),
+                            q_mode=_param(query, "q_mode", "and"),
+                            q_target=_param(query, "q_target", "both"),
+                            orbit=_params(query, "orbit"),
+                            citation_category=_params(query, "citation_category"),
+                            person_role=_params(query, "person_role"),
+                            gender=_params(query, "gender"),
+                            discoverer=_params(query, "discoverer"),
+                            observatory=_params(query, "observatory"),
+                            flag=_params(query, "flag"),
+                            sort=_param(query, "sort", "number"),
+                            direction=_param(query, "direction", "asc"),
+                            limit=_int_param(query, "limit", 50),
+                            offset=_int_param(query, "offset", 0),
+                        )
+                    )
             elif path == "/api/wordcloud":
                 self._json(
                     {
@@ -165,6 +173,22 @@ def _param(query: dict[str, list[str]], key: str, default: str = "") -> str:
 
 def _params(query: dict[str, list[str]], key: str) -> list[str]:
     return query.get(key, [])
+
+
+def _is_initial_search(query: dict[str, list[str]]) -> bool:
+    filter_names = (
+        "q", "orbit", "citation_category", "person_role", "gender",
+        "discoverer", "observatory", "flag",
+    )
+    return (
+        not any(value for name in filter_names for value in _params(query, name))
+        and _param(query, "q_mode", "and") == "and"
+        and _param(query, "q_target", "both") == "both"
+        and query.get("sort") == ["alpha"]
+        and _param(query, "direction", "asc") == "asc"
+        and _int_param(query, "limit", 50) == 50
+        and _int_param(query, "offset", 0) == 0
+    )
 
 
 def _int_param(query: dict[str, list[str]], key: str, default: int) -> int:
