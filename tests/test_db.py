@@ -58,7 +58,19 @@ class DatabaseTests(unittest.TestCase):
         initial_search = db.dataset_initial_search_snapshot(self.connection)
 
         self.assertEqual(snapshot, db.stats(self.connection))
-        self.assertEqual(initial_search, db.search(self.connection, sort="alpha", direction="asc"))
+        self.assertEqual(
+            initial_search,
+            db.search(
+                self.connection,
+                sort="alpha",
+                direction="asc",
+                limit=db.INITIAL_SEARCH_SNAPSHOT_LIMIT,
+            ),
+        )
+        first_three = db.dataset_initial_search_snapshot(self.connection, limit=3)
+        self.assertIsNotNone(first_three)
+        self.assertEqual(first_three["limit"], 3)
+        self.assertEqual(first_three["items"], initial_search["items"][:3])
         self.assertEqual(
             self.connection.execute("SELECT COUNT(*) AS c FROM dataset_stats").fetchone()["c"],
             1,

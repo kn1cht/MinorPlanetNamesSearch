@@ -46,9 +46,10 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/stats":
                 self._json(db.dataset_stats_snapshot(connection) or db.stats(connection))
             elif path == "/api/search":
+                limit = _int_param(query, "limit", 50)
                 initial_search = (
-                    db.dataset_initial_search_snapshot(connection)
-                    if _is_initial_search(query)
+                    db.dataset_initial_search_snapshot(connection, limit=limit)
+                    if _is_initial_search(query, limit=limit)
                     else None
                 )
                 if initial_search is not None:
@@ -69,7 +70,7 @@ class Handler(BaseHTTPRequestHandler):
                             flag=_params(query, "flag"),
                             sort=_param(query, "sort", "number"),
                             direction=_param(query, "direction", "asc"),
-                            limit=_int_param(query, "limit", 50),
+                            limit=limit,
                             offset=_int_param(query, "offset", 0),
                         )
                     )
@@ -175,7 +176,7 @@ def _params(query: dict[str, list[str]], key: str) -> list[str]:
     return query.get(key, [])
 
 
-def _is_initial_search(query: dict[str, list[str]]) -> bool:
+def _is_initial_search(query: dict[str, list[str]], *, limit: int) -> bool:
     filter_names = (
         "q", "orbit", "citation_category", "person_role", "gender",
         "discoverer", "observatory", "flag",
@@ -186,7 +187,7 @@ def _is_initial_search(query: dict[str, list[str]]) -> bool:
         and _param(query, "q_target", "both") == "both"
         and query.get("sort") == ["alpha"]
         and _param(query, "direction", "asc") == "asc"
-        and _int_param(query, "limit", 50) == 50
+        and 1 <= limit <= db.INITIAL_SEARCH_SNAPSHOT_LIMIT
         and _int_param(query, "offset", 0) == 0
     )
 

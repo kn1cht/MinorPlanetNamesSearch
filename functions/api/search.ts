@@ -13,6 +13,8 @@ import {
   rateLimitResponse,
 } from "../db";
 
+const INITIAL_SEARCH_SNAPSHOT_LIMIT = 100;
+
 export const onRequestGet: PagesFunction<Env> = async (ctx) => {
   const cached = await caches.default.match(ctx.request);
   if (cached) return cached;
@@ -27,16 +29,21 @@ export const onRequestGet: PagesFunction<Env> = async (ctx) => {
 
   const url = new URL(ctx.request.url);
   const db = ctx.env.DB;
+  let limit = intParam(url, "limit", 50);
+  let offset = intParam(url, "offset", 0);
+  limit = Math.max(1, Math.min(limit, 200));
+  offset = Math.max(0, offset);
 
-  if (isInitialSearch(url)) {
+  if (isInitialSearch(url, limit, offset)) {
     try {
       const snapshot = await db.prepare(
         "SELECT initial_search_json FROM dataset_stats WHERE cache_key = 'base'"
       ).first<{ initial_search_json: string }>();
       if (snapshot) {
         const parsed: unknown = JSON.parse(snapshot.initial_search_json);
-        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-          const response = jsonResponse(parsed, 200, d1CacheHeaders());
+        const initialPage = initialSearchPage(parsed, limit);
+        if (initialPage) {
+          const response = jsonResponse(initialPage, 200, d1CacheHeaders());
           ctx.waitUntil(caches.default.put(ctx.request, response.clone()));
           return response;
         }
@@ -51,10 +58,6 @@ export const onRequestGet: PagesFunction<Env> = async (ctx) => {
   const filterArgs = parseFilterArgs(url);
   const sort = param(url, "sort", "alpha");
   const direction = param(url, "direction", "asc");
-  let limit = intParam(url, "limit", 50);
-  let offset = intParam(url, "offset", 0);
-  limit = Math.max(1, Math.min(limit, 200));
-  offset = Math.max(0, offset);
 
   const { where, params: filterParams, joins } = buildFilters(filterArgs);
   const repQ = representativeQuery(filterArgs.q);
@@ -149,7 +152,7 @@ export const onRequestGet: PagesFunction<Env> = async (ctx) => {
   return response;
 };
 
-function isInitialSearch(url: URL): boolean {
+function isInitialSearch(url: URL, limit: number, offset: number): boolean {
   const noFilter = [
     "q",
     "orbit",
@@ -166,6 +169,29 @@ function isInitialSearch(url: URL): boolean {
     && param(url, "q_target", "both") === "both"
     && param(url, "sort", "alpha") === "alpha"
     && param(url, "direction", "asc") === "asc"
-    && intParam(url, "limit", 50) === 50
-    && intParam(url, "offset", 0) === 0;
+    && limit <= INITIAL_SEARCH_SNAPSHOT_LIMIT
+    && offset === 0;
+}
+
+function initialSearchPage(snapshot: unknown, limit: number): Record<string, unknown> | null {
+  if (!snapshot || typeof snapshot !== "object" || Array.isArray(snapshot)) return null;
+
+  const payload = snapshot as Record<string, unknown>;
+  const items = payload.items;
+  const total = payload.total;
+  if (!Array.isArray(items)) return null;
+
+  const requiredItems = typeof total === "number" && total >= 0
+    ? Math.min(limit, total)
+    : limit;
+  // A preceding code-only deployment may still be paired with the former
+  // 50-item D1 payload. Query dynamically rather than returning a short page.
+  if (items.length < requiredItems) return null;
+
+  return {
+    ...payload,
+    items: items.slice(0, limit),
+    limit,
+    offset: 0,
+  };
 }

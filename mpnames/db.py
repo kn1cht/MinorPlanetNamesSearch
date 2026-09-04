@@ -58,6 +58,9 @@ STOPWORDS = {
 
 DEPRECATED_CITATION_CATEGORIES = {"Science/Culture"}
 QUERY_TARGETS = {"both", "name", "citation"}
+# Keep a single, bounded first page in the import.  Public APIs can safely
+# slice it for any smaller page size without querying the source tables.
+INITIAL_SEARCH_SNAPSHOT_LIMIT = 100
 
 SEARCH_SORTS = {
     "alpha": "mp.name_ascii COLLATE NOCASE",
@@ -1205,7 +1208,13 @@ def stats(connection: sqlite3.Connection) -> dict[str, Any]:
 def refresh_dataset_stats(connection: sqlite3.Connection) -> dict[str, Any]:
     """Materialize the public initial-view payloads for the current dataset."""
     payload = stats(connection)
-    initial_search = search(connection, sort="alpha", direction="asc", limit=50, offset=0)
+    initial_search = search(
+        connection,
+        sort="alpha",
+        direction="asc",
+        limit=INITIAL_SEARCH_SNAPSHOT_LIMIT,
+        offset=0,
+    )
     connection.execute(
         """
         INSERT INTO dataset_stats (cache_key, payload_json, initial_search_json, refreshed_at)
@@ -1237,8 +1246,17 @@ def dataset_stats_snapshot(connection: sqlite3.Connection) -> dict[str, Any] | N
     return payload if isinstance(payload, dict) else None
 
 
-def dataset_initial_search_snapshot(connection: sqlite3.Connection) -> dict[str, Any] | None:
-    """Return the materialized all-object initial search page, if available."""
+def dataset_initial_search_snapshot(
+    connection: sqlite3.Connection,
+    *,
+    limit: int | None = None,
+) -> dict[str, Any] | None:
+    """Return a requested prefix of the materialized all-object first page.
+
+    ``None`` returns the complete stored payload for maintenance callers.
+    A finite ``limit`` must fit within the stored prefix; this preserves a
+    safe fallback while a Pages deployment and its D1 import are rolling out.
+    """
     row = connection.execute(
         "SELECT initial_search_json FROM dataset_stats WHERE cache_key = 'base'"
     ).fetchone()
@@ -1248,7 +1266,23 @@ def dataset_initial_search_snapshot(connection: sqlite3.Connection) -> dict[str,
         payload = json.loads(row["initial_search_json"])
     except (TypeError, json.JSONDecodeError):
         return None
-    return payload if isinstance(payload, dict) else None
+    if not isinstance(payload, dict) or limit is None:
+        return payload if isinstance(payload, dict) else None
+
+    items = payload.get("items")
+    total = payload.get("total")
+    if not isinstance(items, list) or limit < 1:
+        return None
+    required_items = min(limit, total) if isinstance(total, int) and total >= 0 else limit
+    if len(items) < required_items:
+        return None
+
+    return {
+        **payload,
+        "items": items[:limit],
+        "limit": limit,
+        "offset": 0,
+    }
 
 
 def wordcloud(
