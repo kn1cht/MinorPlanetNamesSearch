@@ -236,23 +236,12 @@ function bindEvents() {
   els.resetFilters.addEventListener("click", resetAllConditions);
   els.clearAllFiltersBtn.addEventListener("click", resetAllConditions);
 
-  // Mobile side panel: close button & overlay = minimize
+  // Mobile side panel: close button & overlay hide the selected detail.
   els.closeSidePanel.addEventListener("click", (e) => {
     e.stopPropagation(); // ヘッダータップへのバブル伝播を防ぐ
     closeMobileDetail();
   });
   els.mobileDetailOverlay.addEventListener("click", closeMobileDetail);
-
-  // Mobile detail button: タップで詳細パネルを展開
-  els.tabDetail.addEventListener("click", (e) => {
-    e.stopPropagation();
-    if (isMobile()) openMobileDetail();
-  });
-
-  // ヘッダーバー全体をタップで展開（閉じるボタンおよびタブボタンを除く）
-  els.sidePanel.querySelector(".side-panel-mobile-header").addEventListener("click", () => {
-    if (isMobile() && !els.sidePanel.classList.contains("is-open")) openMobileDetail();
-  });
 
   // Escape closes mobile panel too
   document.addEventListener("keydown", (e) => {
@@ -720,6 +709,7 @@ async function loadDetail(permid) {
 
   // モバイル: 詳細パネルを開く
   if (isMobile()) {
+    els.sidePanel.classList.add("has-selection");
     openMobileDetail();
   }
 }
@@ -922,6 +912,7 @@ function renderSnippet(v) {
 /** 詳細パネルをモバイル用に初期化する。 */
 function initMobilePanel() {
   els.sideTabDetail.classList.add("tab-active");
+  els.sidePanel.classList.remove("has-selection", "is-open");
 }
 
 /** 現在モバイルレイアウトか判定 */
@@ -936,12 +927,11 @@ function openMobileDetail() {
   document.body.style.overflow = "hidden";
 }
 
-/** モバイル用詳細パネルを最小化（タブバーのみ表示）に戻す */
+/** モバイル用詳細パネルを非表示に戻す */
 function closeMobileDetail() {
-  els.sidePanel.classList.remove("is-open");
+  els.sidePanel.classList.remove("has-selection", "is-open");
   els.mobileDetailOverlay.hidden = true;
   document.body.style.overflow = "";
-  // is-openを外すだけで transform: translateY(calc(100% - 44px)) に戻る
 }
 
 /** 検索コントロールの横スクロールシャドウを更新 */

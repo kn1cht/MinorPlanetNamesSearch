@@ -1183,8 +1183,6 @@ mark.hl {
   }
   body {
     min-height: 100dvh;
-    /* 常時表示のミニタブバー分のパディング */
-      padding-bottom: 44px;
   }
 
     /* ---------- メインコンテンツ: 縦１列 ---------- */
@@ -1206,8 +1204,9 @@ mark.hl {
     overflow: visible;
   }
 
-    /* ---------- サイドパネル: 常時表示ミニタブ + ボトムシート ---------- */
+  /* ---------- サイドパネル: 選択時だけ表示するボトムシート ---------- */
   .side-panel {
+    display: none;
     position: fixed;
     bottom: 0;
     left: 0;
@@ -1218,21 +1217,21 @@ mark.hl {
     border-radius: 16px 16px 0 0;
     border-top: 1px solid var(--line-strong);
     box-shadow: 0 -8px 32px rgba(0, 0, 0, 0.5);
-      /* デフォルト: タブバー分のみ表示 */
-      transform: translateY(calc(100% - 44px));
+    transform: translateY(100%);
     transition: transform 0.3s cubic-bezier(0.32, 0.72, 0, 1);
     will-change: transform;
     overflow: hidden;
   }
-  .side-panel.is-open {
+  .side-panel.has-selection {
+    display: flex;
+  }
+  .side-panel.has-selection.is-open {
     transform: translateY(0);
   }
 
   /* モバイルヘッダー表示 */
   .side-panel-mobile-header {
     display: flex;
-    cursor: pointer;
-      /* タップで展開できることを示唆 */
   }
 
   /* モバイルヘッダーが詳細タイトルを代替 */
