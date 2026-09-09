@@ -1012,6 +1012,11 @@ mark.hl {
 
 /* ===== SITE FOOTER ===== */
 .site-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 6px 14px;
   text-align: center;
   padding: 10px 16px;
   font-size: 0.75rem;
@@ -1026,6 +1031,25 @@ mark.hl {
 }
 .site-footer a:hover {
   color: var(--ink);
+}
+.site-footer .footer-github {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  text-decoration: none;
+}
+.footer-github:hover span {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.footer-github-icon {
+  display: inline-block;
+  width: 1em;
+  height: 1em;
+  flex: none;
+  background-color: currentColor;
+  -webkit-mask: url("/assets/github.svg") center / contain no-repeat;
+  mask: url("/assets/github.svg") center / contain no-repeat;
 }
 
 /* ===== SIDE PANEL MOBILE HEADER (desktop: hidden) ===== */
