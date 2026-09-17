@@ -95,10 +95,8 @@ const els = {
 };
 
 let searchTimer = null;
-let facetRefreshTimer = null;
 let facetRequestVersion = 0;
 const AUTO_SEARCH_DEBOUNCE_MS = 450;
-const FACET_REFRESH_DEBOUNCE_MS = 200;
 
 /* ============================================================
    INIT
@@ -223,7 +221,10 @@ function bindEvents() {
   els.filterModalApply.addEventListener("click", () => {
     closeModal();
     state.offset = 0;
-    refresh();
+    // Exact cross-facet counts are intentionally refreshed once per explicit
+    // application, rather than after every checkbox change.
+    void refresh();
+    void refreshFacetsOnly();
   });
   els.filterModal.addEventListener("click", (e) => {
     if (e.target === els.filterModal) closeModal();
@@ -255,7 +256,6 @@ function bindEvents() {
 
 function resetAllConditions() {
   clearTimeout(searchTimer);
-  clearTimeout(facetRefreshTimer);
   facetRequestVersion++;
   state.queryTerms = [];
   state.queryMode = "and";
@@ -295,7 +295,6 @@ function hasAnyActiveCondition() {
 function openModal() {
   els.filterModal.hidden = false;
   renderFacets();
-  if (hasAnyActiveCondition()) void refreshFacetsOnly();
   // フィルタ内のチェックリストをトップに戻す
   document.querySelectorAll(".check-list").forEach((el) => { el.scrollTop = 0; });
   document.body.style.overflow = "hidden";
@@ -352,10 +351,7 @@ async function refresh() {
   }
 }
 
-/**
- * モーダル内のチェック操作時にファセット件数だけを更新する（検索結果は変えない）。
- * state[stateKey] は呼び出し前に更新済みであること。
- */
+/** 条件を適用した後に、ファセット件数だけを更新する。 */
 async function refreshFacetsOnly() {
   const params = currentFacetParams();
   const requestVersion = ++facetRequestVersion;
@@ -367,13 +363,6 @@ async function refreshFacetsOnly() {
   } catch (e) {
     console.warn("facet refresh failed", e);
   }
-}
-
-function scheduleFacetRefresh() {
-  clearTimeout(facetRefreshTimer);
-  facetRefreshTimer = setTimeout(() => {
-    if (!els.filterModal.hidden) void refreshFacetsOnly();
-  }, FACET_REFRESH_DEBOUNCE_MS);
 }
 
 function restoreBaseFacets() {
@@ -598,9 +587,8 @@ function renderCheckboxGroup(container, values, selected, stateKey) {
         const cur     = new Set(state[stateKey]);
         if (checked) cur.add(value); else cur.delete(value);
         state[stateKey] = Array.from(cur);
-        // タグを即時更新し、ファセット集計は短いデバウンス後に更新する
+        // タグは即時に更新する。重い相互ファセット集計は「適用」時だけ行う。
         renderActiveFilterTags();
-        scheduleFacetRefresh();
       });
     }
     container.appendChild(label);

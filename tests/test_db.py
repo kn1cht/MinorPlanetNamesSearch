@@ -207,6 +207,63 @@ class DatabaseTests(unittest.TestCase):
         self.assertIn("orbit_types", facets)
         self.assertTrue(any(item["value"] == "Apollo" for item in facets["orbit_types"]))
 
+    def test_facets_count_sibling_options_without_their_own_group_filter(self):
+        self.connection.executemany(
+            """
+            INSERT INTO minor_planets (permid, name_ascii, name_display, orbit_type)
+            VALUES (?, ?, ?, ?)
+            """,
+            [
+                ("990001", "FacetTestPlace", "FacetTestPlace", "Facet Test Main"),
+                ("990002", "FacetTestNature", "FacetTestNature", "Facet Test Main"),
+                ("990003", "FacetTestEducation", "FacetTestEducation", "Facet Test Main"),
+                ("990004", "FacetTestOther", "FacetTestOther", "Facet Test Other"),
+            ],
+        )
+        self.connection.executemany(
+            """
+            INSERT INTO categories (permid, kind, value, source, confidence)
+            VALUES (?, 'citation', ?, 'test', 1.0)
+            """,
+            [
+                ("990001", "Facet Test Place"),
+                ("990002", "Facet Test Nature"),
+                ("990003", "Facet Test Education"),
+                ("990004", "Facet Test Place"),
+            ],
+        )
+        self.connection.commit()
+
+        facets = db.facets(
+            self.connection,
+            orbit="Facet Test Main",
+            citation_category="Facet Test Place",
+        )
+        citation_counts = {item["value"]: item["count"] for item in facets["citation_categories"]}
+        orbit_counts = {item["value"]: item["count"] for item in facets["orbit_types"]}
+
+        self.assertEqual(citation_counts["Facet Test Place"], 1)
+        self.assertEqual(citation_counts["Facet Test Nature"], 1)
+        self.assertEqual(citation_counts["Facet Test Education"], 1)
+        self.assertEqual(orbit_counts["Facet Test Main"], 1)
+        self.assertEqual(orbit_counts["Facet Test Other"], 1)
+        self.assertEqual(
+            db.search(
+                self.connection,
+                orbit="Facet Test Main",
+                citation_category="Facet Test Place",
+            )["total"],
+            1,
+        )
+        self.assertEqual(
+            db.search(
+                self.connection,
+                orbit="Facet Test Main",
+                citation_category=["Facet Test Place", "Facet Test Nature"],
+            )["total"],
+            2,
+        )
+
     def test_search_by_number_prioritizes_object_identity_over_citation_text(self):
         db.upsert_minor_planet(
             self.connection,

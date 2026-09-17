@@ -849,6 +849,16 @@ h1 {
   flex: none;
 }
 .modal-header h2 { font-size: 16px; }
+.filter-combination-help {
+  flex: none;
+  margin: 0;
+  padding: 8px 20px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
 .modal-close {
   width: 32px; height: 32px;
   display: inline-flex; align-items: center; justify-content: center;

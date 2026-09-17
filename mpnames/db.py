@@ -1344,43 +1344,93 @@ def facets(
     observatory: str | list[str] = "",
     flag: str | list[str] = "",
 ) -> dict[str, Any]:
-    where, params, joins = _filters(
-        q=q,
-        q_mode=q_mode,
-        q_target=q_target,
-        orbit=orbit,
-        citation_category=citation_category,
-        person_role=person_role,
-        gender=gender,
-        discoverer=discoverer,
-        observatory=observatory,
-        flag=flag,
+    # Count each facet against every *other* group.  This makes values inside
+    # one group alternatives (OR), while groups themselves remain cumulative
+    # (AND).  For example, after selecting Main Belt and Place, Nature is
+    # counted among Main Belt objects rather than among Main Belt *and* Place
+    # objects.
+    orbit_where, orbit_params, orbit_joins = _facet_filter_context(
+        q=q, q_mode=q_mode, q_target=q_target,
+        orbit=orbit, citation_category=citation_category,
+        person_role=person_role, gender=gender,
+        discoverer=discoverer, observatory=observatory, flag=flag,
+        omitted_group="orbit",
+    )
+    citation_where, citation_params, citation_joins = _facet_filter_context(
+        q=q, q_mode=q_mode, q_target=q_target,
+        orbit=orbit, citation_category=citation_category,
+        person_role=person_role, gender=gender,
+        discoverer=discoverer, observatory=observatory, flag=flag,
+        omitted_group="citation_category",
+    )
+    person_role_where, person_role_params, person_role_joins = _facet_filter_context(
+        q=q, q_mode=q_mode, q_target=q_target,
+        orbit=orbit, citation_category=citation_category,
+        person_role=person_role, gender=gender,
+        discoverer=discoverer, observatory=observatory, flag=flag,
+        omitted_group="person_role",
+    )
+    gender_where, gender_params, gender_joins = _facet_filter_context(
+        q=q, q_mode=q_mode, q_target=q_target,
+        orbit=orbit, citation_category=citation_category,
+        person_role=person_role, gender=gender,
+        discoverer=discoverer, observatory=observatory, flag=flag,
+        omitted_group="gender",
+    )
+    discoverer_where, discoverer_params, discoverer_joins = _facet_filter_context(
+        q=q, q_mode=q_mode, q_target=q_target,
+        orbit=orbit, citation_category=citation_category,
+        person_role=person_role, gender=gender,
+        discoverer=discoverer, observatory=observatory, flag=flag,
+        omitted_group="discoverer",
+    )
+    observatory_where, observatory_params, observatory_joins = _facet_filter_context(
+        q=q, q_mode=q_mode, q_target=q_target,
+        orbit=orbit, citation_category=citation_category,
+        person_role=person_role, gender=gender,
+        discoverer=discoverer, observatory=observatory, flag=flag,
+        omitted_group="observatory",
+    )
+    flag_where, flag_params, flag_joins = _facet_filter_context(
+        q=q, q_mode=q_mode, q_target=q_target,
+        orbit=orbit, citation_category=citation_category,
+        person_role=person_role, gender=gender,
+        discoverer=discoverer, observatory=observatory, flag=flag,
+        omitted_group="flag",
     )
     orbit_rows = connection.execute(
         f"""
         SELECT COALESCE(mp.orbit_type, 'Unclassified') AS value, COUNT(DISTINCT mp.permid) AS count
-        FROM minor_planets mp {joins} {where}
+        FROM minor_planets mp {orbit_joins} {orbit_where}
         GROUP BY 1 ORDER BY count DESC, 1
         """,
-        params,
+        orbit_params,
     ).fetchall()
     citation_rows = connection.execute(
         f"""
         SELECT c2.value AS value, COUNT(DISTINCT mp.permid) AS count
         FROM minor_planets mp
-        {joins}
+        {citation_joins}
         JOIN categories c2 ON c2.permid = mp.permid AND c2.kind = 'citation'
-        {where}
+        {citation_where}
         GROUP BY c2.value ORDER BY count DESC, 1
         """,
-        params,
+        citation_params,
     ).fetchall()
-    person_role_rows = _citation_facet_rows(connection, joins, where, params, "person_role")
-    gender_rows = _citation_facet_rows(connection, joins, where, params, "entity_gender")
-    discoverer_rows = _discovery_facet_rows(connection, joins, where, params, "discoverer")
-    observatory_rows = _discovery_facet_rows(connection, joins, where, params, "observatory")
-    neo_count = _facet_flag_count(connection, joins, where, params, "mp.is_neo = 1")
-    pha_count = _facet_flag_count(connection, joins, where, params, "mp.is_pha = 1")
+    person_role_rows = _citation_facet_rows(
+        connection, person_role_joins, person_role_where, person_role_params, "person_role"
+    )
+    gender_rows = _citation_facet_rows(
+        connection, gender_joins, gender_where, gender_params, "entity_gender"
+    )
+    discoverer_rows = _discovery_facet_rows(
+        connection, discoverer_joins, discoverer_where, discoverer_params, "discoverer"
+    )
+    observatory_rows = _discovery_facet_rows(
+        connection, observatory_joins, observatory_where, observatory_params, "observatory"
+    )
+    neo_count = _facet_flag_count(connection, flag_joins, flag_where, flag_params, "mp.is_neo = 1")
+    pha_count = _facet_flag_count(connection, flag_joins, flag_where, flag_params, "mp.is_pha = 1")
     return {
         "orbit_types": [dict(row) for row in orbit_rows],
         "citation_categories": [dict(row) for row in citation_rows],
@@ -1390,6 +1440,35 @@ def facets(
         "observatories": [dict(row) for row in observatory_rows],
         "flags": [{"value": "NEO", "count": neo_count}, {"value": "PHA", "count": pha_count}],
     }
+
+
+def _facet_filter_context(
+    *,
+    q: str | list[str],
+    q_mode: str,
+    q_target: str,
+    orbit: str | list[str],
+    citation_category: str | list[str],
+    person_role: str | list[str],
+    gender: str | list[str],
+    discoverer: str | list[str],
+    observatory: str | list[str],
+    flag: str | list[str],
+    omitted_group: str,
+) -> tuple[str, list[Any], str]:
+    """Build filters for one facet, omitting only that facet's own group."""
+    return _filters(
+        q=q,
+        q_mode=q_mode,
+        q_target=q_target,
+        orbit=[] if omitted_group == "orbit" else orbit,
+        citation_category=[] if omitted_group == "citation_category" else citation_category,
+        person_role=[] if omitted_group == "person_role" else person_role,
+        gender=[] if omitted_group == "gender" else gender,
+        discoverer=[] if omitted_group == "discoverer" else discoverer,
+        observatory=[] if omitted_group == "observatory" else observatory,
+        flag=[] if omitted_group == "flag" else flag,
+    )
 
 
 def _discovery_facet_rows(

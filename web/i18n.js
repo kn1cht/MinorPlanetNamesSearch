@@ -43,6 +43,7 @@ const translations = {
       "detail.evidence": "Evidence",
       
       "modal.title": "Filter Conditions",
+      "modal.combination_help": "Selections and counts update when you click Apply.",
       "modal.orbit": "Orbit Type",
       "modal.citation": "Citation Category",
       "modal.person_role": "Person Role",
@@ -105,6 +106,7 @@ const translations = {
       "detail.evidence": "根拠",
       
       "modal.title": "絞り込み条件",
+      "modal.combination_help": "選択内容と件数は「適用」を押すと更新されます。",
       "modal.orbit": "軌道分類",
       "modal.citation": "命名カテゴリ",
       "modal.person_role": "人物ロール",
