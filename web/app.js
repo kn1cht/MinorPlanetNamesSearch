@@ -175,6 +175,7 @@ function bindEvents() {
       updateDatasetMeta();
       renderActiveFilterTags();
       refresh(); // 再描画が必要な要素（件数等）を更新するため
+      if (state.selectedPermid) void loadDetail(state.selectedPermid);
     });
   });
 
@@ -725,14 +726,14 @@ async function loadDetail(permid) {
     </div>
     <div class="badges" style="margin-bottom:8px">${catBadges || `<span class="badge">${escapeHtml(i18next.t("detail.uncategorized"))}</span>`}${facetBadges}</div>
     <div class="detail-grid">
-      <div><span>Semimajor axis</span>${formatValue(detail.semimajor_axis, " AU")}</div>
-      <div><span>Eccentricity</span>${formatValue(detail.eccentricity)}</div>
-      <div><span>Inclination</span>${formatValue(detail.inclination, "°")}</div>
-      <div><span>H (abs.mag)</span>${formatValue(detail.absolute_magnitude_h)}</div>
-      <div><span>Discovery</span>${formatValue(detail.discovery_date)}</div>
-      <div><span>Observatory</span>${formatValue(detail.discovery_site)}</div>
+      <div><span>${escapeHtml(i18next.t("detail.semimajor_axis"))}</span>${formatValue(detail.semimajor_axis, " AU")}</div>
+      <div><span>${escapeHtml(i18next.t("detail.eccentricity"))}</span>${formatValue(detail.eccentricity)}</div>
+      <div><span>${escapeHtml(i18next.t("detail.inclination"))}</span>${formatValue(detail.inclination, "°")}</div>
+      <div><span>${escapeHtml(i18next.t("detail.absolute_magnitude"))}</span>${formatValue(detail.absolute_magnitude_h)}</div>
+      <div><span>${escapeHtml(i18next.t("detail.discovery"))}</span>${formatValue(detail.discovery_date)}</div>
+      <div><span>${escapeHtml(i18next.t("detail.observatory"))}</span>${formatValue(detail.discovery_site)}</div>
     </div>
-    <p class="discovery-line">${escapeHtml(detail.discoverer_text ? `Discoverer: ${detail.discoverer_text}` : "Discoverer: unknown")}</p>
+    <p class="discovery-line">${escapeHtml(i18next.t("detail.discoverer"))}: ${escapeHtml(detail.discoverer_text || i18next.t("detail.unknown"))}</p>
     ${publicationSection}
     ${personFacetSection}
     <div class="ext-links">
