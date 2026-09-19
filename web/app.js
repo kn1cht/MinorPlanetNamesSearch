@@ -36,15 +36,67 @@ const state = {
   baseFlagFacets: [],
 };
 
-// Mapping from stateKey -> label shown in tags
+// Mapping from stateKey -> labels and API value kind shown in tags.
 const FILTER_META = {
-  orbits:            { label: "軌道",       kind: "orbit" },
-  citationCategories:{ label: "命名",       kind: "citation" },
-  personRoles:       { label: "人物ロール", kind: "person_role" },
-  genders:           { label: "性別",       kind: "gender" },
-  discoverers:       { label: "発見者",     kind: "discoverer" },
-  observatories:     { label: "観測所",     kind: "observatory" },
-  flags:             { label: "フラグ",     kind: "flag" },
+  orbits:            { labelKey: "filter_tag.orbit",       kind: "orbit" },
+  citationCategories:{ labelKey: "filter_tag.citation",    kind: "citation" },
+  personRoles:       { labelKey: "filter_tag.person_role", kind: "person_role" },
+  genders:           { labelKey: "filter_tag.gender",      kind: "gender" },
+  discoverers:       { labelKey: "filter_tag.discoverer",  kind: "discoverer" },
+  observatories:     { labelKey: "filter_tag.observatory", kind: "observatory" },
+  flags:             { labelKey: "filter_tag.flag",        kind: "flag" },
+};
+
+// API values stay in English so filtering is language-independent.  This map
+// identifies only the values that have a localized display label.
+const FACET_VALUE_KEYS = {
+  orbit: {
+    "Atira": "filter_value.orbit.atira",
+    "Aten": "filter_value.orbit.aten",
+    "Apollo": "filter_value.orbit.apollo",
+    "Amor": "filter_value.orbit.amor",
+    "q < 1.665 AU": "filter_value.orbit.q_lt_1_665_au",
+    "Hungaria": "filter_value.orbit.hungaria",
+    "Hilda": "filter_value.orbit.hilda",
+    "Jupiter Trojan": "filter_value.orbit.jupiter_trojan",
+    "Jovian Trojan": "filter_value.orbit.jovian_trojan",
+    "Jupiter Coupled": "filter_value.orbit.jupiter_coupled",
+    "Distant": "filter_value.orbit.distant",
+    "TNO": "filter_value.orbit.tno",
+    "Centaur": "filter_value.orbit.centaur",
+    "Mars Crosser": "filter_value.orbit.mars_crosser",
+    "Main Belt": "filter_value.orbit.main_belt",
+    "Unclassified": "filter_value.orbit.unclassified",
+    "Other": "filter_value.orbit.other",
+  },
+  citation: {
+    "Person": "filter_value.citation.person",
+    "Country/Region/Town": "filter_value.citation.country_region_town",
+    "Education": "filter_value.citation.education",
+    "Research": "filter_value.citation.research",
+    "Place": "filter_value.citation.place",
+    "Mythology": "filter_value.citation.mythology",
+    "Organization": "filter_value.citation.organization",
+    "Nature": "filter_value.citation.nature",
+    "Artifact/Concept": "filter_value.citation.artifact_concept",
+    "Character": "filter_value.citation.character",
+    "Epoch/Event": "filter_value.citation.epoch_event",
+    "No Citation": "filter_value.citation.no_citation",
+    "Other": "filter_value.citation.other",
+    "Unknown": "filter_value.citation.unknown",
+  },
+  person_role: {
+    "Scientist": "filter_value.person_role.scientist",
+    "Cultural/Public Figure": "filter_value.person_role.cultural_public_figure",
+    "Discoverer-relative/Friend": "filter_value.person_role.discoverer_relative_friend",
+  },
+  gender: {
+    "Female": "filter_value.gender.female",
+    "Male": "filter_value.gender.male",
+    "Unknown": "filter_value.gender.unknown",
+    "Non-person": "filter_value.gender.non_person",
+    "Multiple/Mixed": "filter_value.gender.multiple_mixed",
+  },
 };
 
 const els = {
@@ -467,14 +519,14 @@ function renderDiscoveryLine(item) {
 
 function renderSearchBadges(item) {
   const b = [];
-  if (item.orbit_type) b.push(`<span class="badge orbit">${escapeHtml(item.orbit_type)}</span>`);
+  if (item.orbit_type) b.push(`<span class="badge orbit">${escapeHtml(displayFacetValue("orbit", item.orbit_type))}</span>`);
   (item.citation_categories || []).forEach((c) =>
-    b.push(`<span class="badge citation">${escapeHtml(c)}</span>`)
+    b.push(`<span class="badge citation">${escapeHtml(displayFacetValue("citation", c))}</span>`)
   );
   (item.person_roles || []).forEach((role) =>
-    b.push(`<span class="badge citation">${escapeHtml(role)}</span>`)
+    b.push(`<span class="badge citation">${escapeHtml(displayFacetValue("person_role", role))}</span>`)
   );
-  if (item.gender) b.push(`<span class="badge citation">${escapeHtml(item.gender)}</span>`);
+  if (item.gender) b.push(`<span class="badge citation">${escapeHtml(displayFacetValue("gender", item.gender))}</span>`);
   if (item.is_neo) b.push(`<span class="badge flag">NEO</span>`);
   if (item.is_pha) b.push(`<span class="badge pha">PHA</span>`);
   return b.join("");
@@ -519,8 +571,8 @@ function renderActiveFilterTags() {
       const tag = document.createElement("span");
       tag.className = "filter-tag";
       tag.innerHTML = `
-        <span class="filter-tag-kind">${escapeHtml(meta.label)}</span>
-        ${escapeHtml(value)}
+        <span class="filter-tag-kind">${escapeHtml(i18next.t(meta.labelKey))}</span>
+        ${escapeHtml(displayFacetValue(meta.kind, value))}
         <span class="filter-tag-remove" aria-label="${i18next.t("app.remove")}">✕</span>
       `;
       // Click body → open modal for editing
@@ -577,7 +629,7 @@ function renderCheckboxGroup(container, values, selected, stateKey) {
     label.htmlFor = id;
     label.innerHTML = `
       <input id="${id}" type="checkbox" value="${escapeHtml(item.value)}" ${isChecked ? "checked" : ""}${isZero ? " disabled" : ""}>
-      <span class="label">${escapeHtml(item.value)}</span>
+      <span class="label">${escapeHtml(displayFacetValue(FILTER_META[stateKey].kind, item.value))}</span>
       <span class="count">${formatNumber(item.count)}</span>
     `;
     if (!isZero) {
@@ -671,7 +723,7 @@ async function loadDetail(permid) {
       <strong>${escapeHtml(detail.name_display || detail.name_ascii)}</strong>
       <span class="meta">${escapeHtml(detail.iau_designation || `(${detail.permid})`)}</span>
     </div>
-    <div class="badges" style="margin-bottom:8px">${catBadges || `<span class="badge">Uncategorized</span>`}${facetBadges}</div>
+    <div class="badges" style="margin-bottom:8px">${catBadges || `<span class="badge">${escapeHtml(i18next.t("detail.uncategorized"))}</span>`}${facetBadges}</div>
     <div class="detail-grid">
       <div><span>Semimajor axis</span>${formatValue(detail.semimajor_axis, " AU")}</div>
       <div><span>Eccentricity</span>${formatValue(detail.eccentricity)}</div>
@@ -733,7 +785,7 @@ function renderPersonFacetSection(roleFacets, genderFacet) {
         ${values.map(({ label, facet }) => `
           <div class="detail-facet-row">
             <span class="detail-facet-label">${escapeHtml(label)}</span>
-            <span class="badge citation">${escapeHtml(facet.value)}</span>
+            <span class="badge citation">${escapeHtml(displayFacetValue(facet.kind === "person_role" ? "person_role" : "gender", facet.value))}</span>
           </div>
         `).join("")}
       </div>
@@ -742,15 +794,17 @@ function renderPersonFacetSection(roleFacets, genderFacet) {
 }
 
 function renderDetailBadge(category) {
-  if (category.kind === "orbit")    return `<span class="badge orbit">Orbit: ${escapeHtml(category.value)}</span>`;
-  if (category.kind === "citation") return `<span class="badge citation">${escapeHtml(category.value)}</span>`;
+  if (category.kind === "orbit")    return `<span class="badge orbit">${escapeHtml(i18next.t("detail.orbit"))}: ${escapeHtml(displayFacetValue("orbit", category.value))}</span>`;
+  if (category.kind === "citation") return `<span class="badge citation">${escapeHtml(displayFacetValue("citation", category.value))}</span>`;
   if (category.kind === "flag")     return `<span class="badge ${category.value === "PHA" ? "pha" : "flag"}">${escapeHtml(category.value)}</span>`;
   return `<span class="badge">${escapeHtml(category.value)}</span>`;
 }
 
 function renderDetailFacetBadge(facet) {
-  const prefix = facet.kind === "person_role" ? "Role" : "Gender";
-  return `<span class="badge citation">${prefix}: ${escapeHtml(facet.value)}</span>`;
+  const isPersonRole = facet.kind === "person_role";
+  const prefix = i18next.t(isPersonRole ? "detail.roles" : "detail.gender");
+  const kind = isPersonRole ? "person_role" : "gender";
+  return `<span class="badge citation">${escapeHtml(prefix)}: ${escapeHtml(displayFacetValue(kind, facet.value))}</span>`;
 }
 
 /* ============================================================
@@ -851,6 +905,11 @@ function openPageDropdown() {
    UTILITIES
    ============================================================ */
 function qs(sel) { return document.querySelector(sel); }
+
+function displayFacetValue(kind, value) {
+  const key = FACET_VALUE_KEYS[kind]?.[value];
+  return key ? i18next.t(key) : value;
+}
 
 function slug(value) {
   return String(value).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "value";
