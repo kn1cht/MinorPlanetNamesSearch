@@ -58,8 +58,8 @@
   --badge-pha-text:         var(--rose);
 
   /* --- Scrollbar & Selection --- */
-  --scrollbar-thumb:        #44453e;
-  --scrollbar-thumb-hover:  #64655b;
+  --scrollbar-thumb:        #929292;
+  --scrollbar-thumb-hover:  #b8b8b8;
   --selection-bg:           var(--accent-strong);
   --selection-color:        #191a16;
 
@@ -961,7 +961,60 @@ button.primary:hover { opacity: 0.88; }
 
 
 /* ===== SCROLLBAR ===== */
-::-webkit-scrollbar { width: 8px; height: 8px; }
+* { scrollbar-width: thin; scrollbar-color: var(--scrollbar-thumb) transparent; }
+.scroll-frame {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+.scroll-frame-list { flex: none; }
+.scroll-frame-horizontal { flex: none; overflow: visible; }
+.scroll-frame-horizontal > .custom-scroll-viewport { margin-right: 0; }
+.scroll-frame-horizontal.has-scrollbar { padding-bottom: 10px; }
+.scroll-frame-horizontal .scroll-track {
+  top: auto;
+  left: 3px;
+  right: 3px;
+  bottom: 0;
+  width: auto;
+  height: 6px;
+}
+.scroll-frame-horizontal .scroll-thumb { height: 100%; }
+.custom-scroll-viewport {
+  min-height: 0;
+  min-width: 0;
+  scrollbar-width: none;
+  /* Reserve space so the bar never covers text or checkboxes. */
+  margin-right: 12px;
+}
+.custom-scroll-viewport::-webkit-scrollbar { display: none; }
+.scroll-track {
+  position: absolute;
+  top: 3px;
+  right: 2px;
+  bottom: 3px;
+  width: 6px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.08);
+  touch-action: none;
+  user-select: none;
+}
+.scroll-thumb {
+  width: 100%;
+  border-radius: 4px;
+  background: var(--scrollbar-thumb);
+}
+.scroll-track:hover .scroll-thumb,
+.scroll-track.is-dragging .scroll-thumb { background: var(--scrollbar-thumb-hover); }
+@media (forced-colors: active) {
+  .scroll-track { background: Canvas; border: 1px solid ButtonText; }
+  .scroll-thumb { background: ButtonText; }
+}
+::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); border-radius: 999px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--scrollbar-thumb-hover); }
@@ -1213,6 +1266,8 @@ mark.hl {
   .result-list {
     overflow: visible;
   }
+  .scroll-frame-results { overflow: visible; flex: none; }
+  .scroll-frame-results > .custom-scroll-viewport { margin-right: 0; }
 
   /* ---------- サイドパネル: 選択時だけ表示するボトムシート ---------- */
   .side-panel {
