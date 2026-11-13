@@ -8,6 +8,7 @@ from pathlib import Path
 from . import db
 from .ingest import (
     INGEST_MODES,
+    INGEST_SOURCES,
     backfill_wgsbn_only,
     classify_person_facets_existing,
     ingest,
@@ -40,10 +41,14 @@ def main(argv: list[str] | None = None) -> int:
     sample_parser.add_argument("--ollama-model", default=None)
     sample_parser.add_argument("--ollama-host", default=OLLAMA_HOST)
 
-    ingest_parser = subparsers.add_parser("ingest", help="Fetch MPC data and update the local database")
+    ingest_parser = subparsers.add_parser("ingest", help="Fetch MPC or WGSBN data and update the local database")
     ingest_parser.add_argument("--db", default=str(db.DEFAULT_DB))
     ingest_parser.add_argument("--limit", type=int, default=None)
     ingest_parser.add_argument("--mode", choices=sorted(INGEST_MODES), default="add")
+    ingest_parser.add_argument(
+        "--source", choices=sorted(INGEST_SOURCES), default="mpc",
+        help="Use the MPC name list or WGSBN Bulletins as the source of names (wgsbn supports add mode)",
+    )
     ingest_parser.add_argument("--delay", type=float, default=IDENTIFIER_INTER_REQUEST_DELAY_SECONDS)
     ingest_parser.add_argument("--batch-size", type=int, default=IDENTIFIER_BATCH_SIZE)
     ingest_parser.add_argument("--pause-every", type=int, default=IDENTIFIER_LONG_PAUSE_EVERY_REQUESTS)
@@ -128,10 +133,13 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "ingest":
+        if args.source == "wgsbn" and args.mode != "add":
+            ingest_parser.error("--source wgsbn requires --mode add")
         result = ingest(
             Path(args.db),
             limit=args.limit,
             mode=args.mode,
+            source=args.source,
             delay=args.delay,
             batch_size=args.batch_size,
             pause_every=args.pause_every,
@@ -145,7 +153,7 @@ def main(argv: list[str] | None = None) -> int:
             progress=ProgressReporter(enabled=not args.quiet),
         )
         print(
-            f"Ingest mode={result['mode']}: selected {result['selected_records']} "
+            f"Ingest mode={result['mode']} source={result['source']}: selected {result['selected_records']} "
             f"of {result['listed_records']} listed names; "
             f"inserted {result['inserted']}, updated {result['updated']}, "
             f"unchanged {result['unchanged']}; "

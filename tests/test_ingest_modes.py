@@ -1,6 +1,7 @@
 from pathlib import Path
 import tempfile
 import unittest
+from urllib.error import URLError
 from unittest.mock import Mock, patch
 
 from mpnames import db
@@ -8,6 +9,7 @@ from mpnames.categories import Category
 from mpnames.ingest import _unique_orbit_count, ingest, reclassify_existing
 from mpnames.mpcorb import OrbitRecord
 from mpnames.mpnames_parser import NameRecord
+from mpnames.numbered_mps import DiscoveryRecord
 from mpnames.wgsbn import WgsbnNaming
 
 
@@ -147,6 +149,82 @@ class IngestModeTests(unittest.TestCase):
         collect.assert_called_once()
         self.assertEqual(result["wgsbn_bulletins_fetched"], 1)
         self.assertEqual(result["wgsbn_namings_fetched"], 2)
+
+    def test_wgsbn_add_imports_cached_and_new_names_once_without_mpc_list(self):
+        self._upsert("1")
+        archive = "https://www.wgsbn-iau.org/files/json/index.html"
+        cached_url = "https://www.wgsbn-iau.org/files/json/V006/WGSBNBull_V006_016.json"
+        new_url = cached_url.replace("_016", "_017")
+        connection = db.connect(self.db_path)
+        db.replace_wgsbn_bulletin(
+            connection, source_url=cached_url, volume=6, issue=16,
+            published_date="2026-09-28", published_year=2026,
+            namings=[WgsbnNaming("1", "AlreadyPresent", None, None), WgsbnNaming("2", "Étoile", "A French town.", "Ref 2")],
+        )
+        connection.commit()
+        connection.close()
+        archive_body = (
+            '<li>Volume 6, #16 <a href="files/json/V006/WGSBNBull_V006_016.json">UTF-8 only</a> (2026 Sept. 28)\n'
+            '<li>Volume 6, #17 <a href="files/json/V006/WGSBNBull_V006_017.json">UTF-8 only</a> (2026 Oct. 19)'
+        )
+        responses = {
+            archive: archive_body,
+            new_url: '[{"mp_number":"2","name":"Repeat"},{"mp_number":"3","name":"NewName","citation":"A new citation."}]',
+        }
+        identifiers = Mock(return_value={"2": _identifier("2", "Unnamed", "An outdated citation.")})
+        discoveries = {"2": DiscoveryRecord("2", "", "2000-01-01", "Test Site", "Test Discoverer", ("Test Discoverer",))}
+        mpc_names = Mock(side_effect=AssertionError("WGSBN ingest must not load the MPC list"))
+        with patch.multiple(
+            "mpnames.ingest", fetch_names=mpc_names, fetch_identifiers=identifiers,
+            fetch_orbits=Mock(return_value={}), fetch_discoveries=Mock(return_value=discoveries),
+            _read_text_url=Mock(side_effect=responses.__getitem__),
+        ):
+            first = ingest(self.db_path, source="wgsbn", limit=1)
+            second = ingest(self.db_path, source="wgsbn", limit=1)
+            repeat = ingest(self.db_path, source="wgsbn")
+
+        self.assertEqual([r["inserted"] for r in (first, second, repeat)], [1, 1, 0])
+        self.assertEqual(first["wgsbn_bulletins_fetched"], 1)
+        self.assertEqual(second["wgsbn_bulletins_fetched"], 0)
+        self.assertEqual([[n.permid for n in c.args[0]] for c in identifiers.call_args_list], [["2"], ["3"]])
+        with db.connect(self.db_path) as connection:
+            rows = connection.execute(
+                "SELECT name_ascii, name_display, citation_text, packed_permid, discovery_site, naming_source_url "
+                "FROM minor_planets ORDER BY permid"
+            ).fetchall()
+        connection.close()
+        self.assertEqual(rows[0][1], "Name1")
+        self.assertEqual(tuple(rows[1]), ("Etoile", "Étoile", "A French town.", "00002", "Test Site", cached_url))
+        self.assertEqual(tuple(rows[2][:3]), ("NewName", "NewName", "A new citation."))
+
+    def test_wgsbn_add_keeps_name_and_citation_when_mpc_is_unavailable(self):
+        self._upsert("1")
+        connection = db.connect(self.db_path)
+        db.replace_wgsbn_bulletin(
+            connection, source_url="https://example.org/bulletin.json", volume=6, issue=1,
+            published_date="2026-01-12", published_year=2026,
+            namings=[WgsbnNaming("2", "Example", "A & B < C.", None)],
+        )
+        # Older caches can contain a naming that has since been withdrawn.
+        connection.execute("INSERT INTO naming_publications SELECT '579513', source_url, published_date, "
+                           "published_year, 'Withdrawn', citation_text, reference FROM naming_publications")
+        connection.commit()
+        connection.close()
+        with patch.multiple(
+            "mpnames.ingest", fetch_identifiers=Mock(side_effect=URLError("offline")),
+            _fetch_orbit_payload=Mock(side_effect=URLError("offline")),
+            fetch_discoveries=Mock(side_effect=URLError("offline")),
+        ):
+            result = ingest(self.db_path, source="wgsbn", wgsbn_sync=False)
+
+        self.assertEqual(result["inserted"], 1)
+        self.assertEqual(self._permids(), ["1", "2"])
+        connection = db.connect(self.db_path)
+        row = connection.execute(
+            "SELECT iau_designation, citation_text, orbit_type FROM minor_planets WHERE permid = '2'"
+        ).fetchone()
+        connection.close()
+        self.assertEqual(tuple(row), ("(2)", "A & B < C.", None))
 
     def test_ingest_classifies_ready_records_during_orbit_pause(self):
         records = _records("1", "2")

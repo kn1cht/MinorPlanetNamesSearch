@@ -1,4 +1,4 @@
-"""Data ingestion from MPC sources."""
+"""Data ingestion from MPC and WGSBN sources."""
 
 from __future__ import annotations
 
@@ -9,6 +9,7 @@ import urllib.error
 import urllib.request
 import unicodedata
 from collections.abc import Callable
+from html import escape
 from pathlib import Path
 from typing import Any
 
@@ -38,10 +39,17 @@ from .settings import (
     WGSBN_ARCHIVE_URL,
     WGSBN_INTER_REQUEST_DELAY_SECONDS,
 )
-from .wgsbn import parse_wgsbn_archive, parse_wgsbn_namings, wgsbn_volume_year
+from .wgsbn import (
+    WITHDRAWN_NAMING_PERMIDS,
+    WgsbnNaming,
+    parse_wgsbn_archive,
+    parse_wgsbn_namings,
+    wgsbn_volume_year,
+)
 
 
 INGEST_MODES = {"add", "update", "repair"}
+INGEST_SOURCES = {"mpc", "wgsbn"}
 
 
 def ingest(
@@ -59,6 +67,7 @@ def ingest(
     orbit_pause_every: int = ORBIT_LONG_PAUSE_EVERY_REQUESTS,
     orbit_pause_seconds: float = ORBIT_LONG_PAUSE_SECONDS,
     mode: str = "add",
+    source: str = "mpc",
     classifier_mode: str = "rules",
     ollama_model: str | None = None,
     ollama_host: str = OLLAMA_HOST,
@@ -67,19 +76,50 @@ def ingest(
 ) -> dict[str, Any]:
     if mode not in INGEST_MODES:
         raise ValueError(f"Unknown ingest mode: {mode}")
+    if source not in INGEST_SOURCES:
+        raise ValueError(f"Unknown ingest source: {source}")
+    if source == "wgsbn" and mode != "add":
+        raise ValueError("The WGSBN source supports only add mode")
+    if limit is not None and limit < 0:
+        raise ValueError("limit must be greater than or equal to zero")
 
     connection = db.connect(db_path)
     db.initialize(connection)
 
-    progress.message(f"Fetching named-object list from {mpnames_url}")
-    names = fetch_names(mpnames_url)
+    wgsbn_result = {"fetched_bulletins": 0, "fetched_namings": 0}
+    wgsbn_namings: dict[str, WgsbnNaming] = {}
+    if source == "wgsbn":
+        if wgsbn_sync:
+            wgsbn_result = _collect_new_wgsbn_bulletins(connection, progress=progress)
+            connection.commit()
+        wgsbn_namings = _wgsbn_namings_by_permid(connection)
+        names = [
+            NameRecord(naming.permid, _ascii_name(naming.name) or naming.name, naming.name)
+            for naming in wgsbn_namings.values()
+        ]
+    else:
+        progress.message(f"Fetching named-object list from {mpnames_url}")
+        names = fetch_names(mpnames_url)
     progress.message(f"Named-object list contains {len(names)} records")
     selected_names = _select_names_for_mode(connection, names, mode=mode, limit=limit)
     progress.message(f"Ingest mode={mode}; selected {len(selected_names)} records for detail fetch")
-    discoveries = fetch_discoveries(cache_path=NUMBERED_MPS_CACHE, progress=progress) if selected_names else {}
+    def fetch_details(label: str, fetch: Callable[[], dict]) -> dict:
+        if not selected_names:
+            return {}
+        try:
+            return fetch()
+        except (OSError, json.JSONDecodeError) as exc:
+            if source != "wgsbn":
+                raise
+            progress.message(f"{label} unavailable: {exc}; continuing with WGSBN names")
+            return {}
 
-    identifiers = (
-        fetch_identifiers(
+    discoveries = fetch_details(
+        "MPC discovery data", lambda: fetch_discoveries(cache_path=NUMBERED_MPS_CACHE, progress=progress)
+    )
+    identifiers = fetch_details(
+        "MPC Identifier API",
+        lambda: fetch_identifiers(
             selected_names,
             identifier_url=identifier_url,
             delay=delay,
@@ -87,16 +127,21 @@ def ingest(
             pause_every=pause_every,
             pause_seconds=pause_seconds,
             progress=progress,
-        )
-        if selected_names
-        else {}
+        ),
     )
+    if source == "wgsbn":
+        identifiers = {
+            str(identifier["permid"]): identifier
+            for identifier in identifiers.values()
+            if identifier.get("permid")
+        }
     classifier = CitationClassifier(mode=classifier_mode, model=ollama_model, host=ollama_host)
     facet_classifier = PersonFacetClassifier(mode=classifier_mode, model=ollama_model, host=ollama_host)
     job: dict[str, Any] | None = None
     orbits: dict[str, OrbitRecord] = {}
     stats = {
         "mode": mode,
+        "source": source,
         "listed_records": len(names),
         "selected_records": len(selected_names),
         "identifier_records": len(identifiers),
@@ -131,12 +176,22 @@ def ingest(
         current_job = ensure_job()
         for zero_based_index in range(next_write_index, upto_index):
             record = selected_names[zero_based_index]
-            identifier = (
-                identifiers.get(record.permid)
-                or identifiers.get(record.name_ascii)
-                or identifiers.get(record.name_display)
-                or {}
-            )
+            if source == "wgsbn":
+                # The identifier service can return an unnamed object while the
+                # Bulletin already has its official name and citation.
+                identifier = dict(identifiers.get(record.permid, {}))
+                if not identifier.get("iau_designation"):
+                    identifier["iau_designation"] = f"({record.permid})"
+                citation = wgsbn_namings[record.permid].citation
+                if citation:
+                    identifier["citation"] = escape(citation)
+            else:
+                identifier = (
+                    identifiers.get(record.permid)
+                    or identifiers.get(record.name_ascii)
+                    or identifiers.get(record.name_display)
+                    or {}
+                )
             permid = str(identifier.get("permid") or record.permid)
             orbit = _orbit_for(permid, identifier, orbit_lookup)
             discovery = discoveries.get(record.permid) or discoveries.get(permid)
@@ -184,6 +239,7 @@ def ingest(
             pause_seconds=orbit_pause_seconds,
             progress=progress,
             on_long_pause=write_ready_records,
+            best_effort=source == "wgsbn",
         )
         stats["orbit_records"] = _unique_orbit_count(orbits)
         progress.message(f"Fetched {_unique_orbit_count(orbits)} orbit records")
@@ -196,10 +252,10 @@ def ingest(
     connection.commit()
 
     try:
-        if wgsbn_sync:
+        if wgsbn_sync and source == "mpc":
             wgsbn_result = _collect_new_wgsbn_bulletins(connection, progress=progress)
-            stats["wgsbn_bulletins_fetched"] = wgsbn_result["fetched_bulletins"]
-            stats["wgsbn_namings_fetched"] = wgsbn_result["fetched_namings"]
+        stats["wgsbn_bulletins_fetched"] = wgsbn_result["fetched_bulletins"]
+        stats["wgsbn_namings_fetched"] = wgsbn_result["fetched_namings"]
         naming_metadata = db.sync_wgsbn_naming_metadata(connection)
         stats["naming_metadata_updated"] = naming_metadata["updated"]
         stats["naming_metadata_unchanged"] = naming_metadata["unchanged"]
@@ -598,6 +654,22 @@ def _ascii_name(name: str) -> str:
     return unicodedata.normalize("NFKD", name).encode("ascii", "ignore").decode("ascii")
 
 
+def _wgsbn_namings_by_permid(connection: Any) -> dict[str, WgsbnNaming]:
+    """Read cached names in publication order, including previously fetched issues."""
+    namings: dict[str, WgsbnNaming] = {}
+    for row in connection.execute(
+        """
+        SELECT permid, name, citation_text, reference
+        FROM naming_publications
+        ORDER BY published_year, source_url, CAST(permid AS INTEGER)
+        """
+    ):
+        permid = row["permid"]
+        if permid not in WITHDRAWN_NAMING_PERMIDS and permid not in namings:
+            namings[permid] = WgsbnNaming(permid, row["name"], row["citation_text"], row["reference"])
+    return namings
+
+
 def _normalize_category_filters(values: list[str]) -> list[str]:
     normalized: list[str] = []
     for raw in values:
@@ -750,6 +822,7 @@ def fetch_orbits(
     pause_seconds: float = ORBIT_LONG_PAUSE_SECONDS,
     progress: ProgressReporter = QUIET_PROGRESS,
     on_long_pause: Callable[[int, dict[str, OrbitRecord]], None] | None = None,
+    best_effort: bool = False,
 ) -> dict[str, OrbitRecord]:
     records: dict[str, OrbitRecord] = {}
     total = len(names)
@@ -762,7 +835,13 @@ def fetch_orbits(
         )
         desig = _orbit_api_designation(record, identifier)
         progress.step("Orbit API request", index, total, detail=desig)
-        payload = _fetch_orbit_payload(orbit_url, desig)
+        try:
+            payload = _fetch_orbit_payload(orbit_url, desig)
+        except (OSError, json.JSONDecodeError) as exc:
+            if not best_effort:
+                raise
+            progress.message(f"MPC Orbit API unavailable: {exc}; keeping orbit data fetched so far")
+            break
         orbit = parse_orbits_api_response(payload)
         if orbit:
             for key in _orbit_keys(record, identifier, orbit):

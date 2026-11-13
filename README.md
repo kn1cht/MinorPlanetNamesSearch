@@ -54,9 +54,23 @@ reference, and source URL. WGSBN Bulletin coverage begins in 2021; earlier names
 require a separate MPC Circulars backfill. Use `ingest --mode repair` to retry
 this synchronization after a failed or interrupted ingest.
 
-If a named object remains absent from both the MPC name list and Identifier API,
-it can be explicitly retained from a non-withdrawn WGSBN Bulletin record (rather
-than automatically promoting every transient MPC lag):
+To add official names before they appear in the MPC name list, use the WGSBN
+Bulletins as the source of names:
+
+```powershell
+python -m mpnames ingest --mode add --source wgsbn --limit 500 --classifier ollama
+```
+
+This mode does not fetch the MPC name list. It checks for new Bulletins and
+adds missing permanent numbers from both new and previously cached Bulletins.
+It uses the WGSBN name and citation and looks up identifiers, orbits, and
+discovery circumstances by permanent number from MPC. If those details cannot
+be fetched, the name and citation can still be added. Re-running `add` skips
+existing objects; the default MPC `repair` can fill missing details once the
+objects appear in the MPC list. WGSBN is available as a source in `add` mode.
+
+For a single object already in the local Bulletin cache, the manual backfill
+command is also available:
 
 ```powershell
 python -m mpnames backfill-wgsbn-only --permid <permanent-number>
