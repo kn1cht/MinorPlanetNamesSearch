@@ -69,6 +69,25 @@ be fetched, the name and citation can still be added. Re-running `add` skips
 existing objects; the default MPC `repair` can fill missing details once the
 objects appear in the MPC list. WGSBN is available as a source in `add` mode.
 
+When ingest reads the MPC name list, it reports differences in the display or
+search name of objects already in the DB, matched by permanent number. An
+ordinary `add` leaves those names alone and shows the correction command when
+there are differences. Review the warnings, then pass only the permanent
+numbers you want to correct. For example:
+
+```powershell
+python -m mpnames ingest --mode add --limit 0 --sync-mpc-names 19715 20769
+```
+
+`--sync-mpc-names` requires one or more numbers and works in `add` mode.
+The correction is independent of `--limit`. It updates the two name
+fields and the search index, and does not replace citations, classifications,
+or orbital or discovery data. The command above also skips WGSBN publication
+metadata sync. Differences can be spelling corrections or
+differences in character representation. Objects absent from the MPC list
+are left as they are. `--source wgsbn` only reads the MPC name list when
+`--sync-mpc-names` is specified.
+
 For a single object already in the local Bulletin cache, the manual backfill
 command is also available:
 
@@ -114,6 +133,11 @@ Citation categories can be assigned with one of three classifiers:
 - `auto`: use ollama when its HTTP API is available; otherwise fall back to rules.
 - `ollama`: use ollama as the primary classifier, with rule fallback if the call fails or returns invalid labels.
 
+`ingest` gives each Ollama request 60 seconds by default. If requests time out,
+increase the wait with `--timeout 120`, or disable thinking on citation
+classification retries with `--no-think-on-review`. A classification timeout
+falls back to rules; it does not by itself prevent the object from being added.
+
 To reclassify an existing database without downloading MPC data again. This also
 updates person roles and entity-gender facets using the resulting citation
 category in the same classification job:
@@ -121,6 +145,19 @@ category in the same classification job:
 ```powershell
 python -m mpnames reclassify --classifier ollama
 ```
+
+To retry only objects whose current citation categories were all produced by
+rules, add `--source rule`. Combine it with `--job-id` to scope the retry to a
+specific classification job, and use `--citation-only` to keep the current
+person roles and gender facets:
+
+```powershell
+python -m mpnames reclassify --source rule --job-id JOB_ID --citation-only --classifier ollama --timeout 120 --no-think-on-review
+```
+
+Replace `JOB_ID` with the job's full ID. `--source rule` selects stored rule
+results regardless of why rules were used, including fallback after a timeout.
+`--classifier` independently selects the classifier for the new run.
 
 Person roles and entity gender are stored separately from the primary citation
 category. They can be classified from existing citation text without downloading

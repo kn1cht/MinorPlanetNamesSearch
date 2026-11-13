@@ -17,6 +17,13 @@ class ParserTests(unittest.TestCase):
         self.assertEqual(records[0].name_display, "A Coruña")
         self.assertEqual(records[2].name_ascii, "Ceres")
 
+    def test_parse_mpnames_display_name_with_tex_apostrophe(self):
+        [record] = parse_mpnames_html(
+            r"<pre>(162500) Silvanodelbo'    Silvanodelbo{\textquoteright}</pre>"
+        )
+        self.assertEqual(record.name_ascii, "Silvanodelbo'")
+        self.assertEqual(record.name_display, "Silvanodelbo’")
+
     def test_parse_mpcorb_flags(self):
         records = parse_mpcorb_lines((FIXTURES / "mpcorb_sample.dat").read_text(encoding="utf-8").splitlines())
         apollo = records["1862"]

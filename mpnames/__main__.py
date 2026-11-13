@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import argparse
+import math
 from pathlib import Path
 
 from . import db
 from .ingest import (
+    CITATION_SOURCES,
     INGEST_MODES,
     INGEST_SOURCES,
     backfill_wgsbn_only,
@@ -49,6 +51,10 @@ def main(argv: list[str] | None = None) -> int:
         "--source", choices=sorted(INGEST_SOURCES), default="mpc",
         help="Use the MPC name list or WGSBN Bulletins as the source of names (wgsbn supports add mode)",
     )
+    ingest_parser.add_argument(
+        "--sync-mpc-names", nargs="+", action="extend", default=[], metavar="NUMBER",
+        help="In add mode, update existing names only for the specified permanent numbers",
+    )
     ingest_parser.add_argument("--delay", type=float, default=IDENTIFIER_INTER_REQUEST_DELAY_SECONDS)
     ingest_parser.add_argument("--batch-size", type=int, default=IDENTIFIER_BATCH_SIZE)
     ingest_parser.add_argument("--pause-every", type=int, default=IDENTIFIER_LONG_PAUSE_EVERY_REQUESTS)
@@ -59,6 +65,11 @@ def main(argv: list[str] | None = None) -> int:
     ingest_parser.add_argument("--classifier", choices=["rules", "auto", "ollama"], default="rules")
     ingest_parser.add_argument("--ollama-model", default=None)
     ingest_parser.add_argument("--ollama-host", default=OLLAMA_HOST)
+    ingest_parser.add_argument("--timeout", type=float, default=60.0, help="Ollama request timeout in seconds (default: 60)")
+    ingest_parser.add_argument(
+        "--think-on-review", action=argparse.BooleanOptionalAction, default=True,
+        help="Enable thinking on citation classification retries (default: True)",
+    )
     ingest_parser.add_argument("--quiet", action="store_true", help="Hide progress output")
 
     reclassify_parser = subparsers.add_parser("reclassify", help="Reclassify existing citation categories")
@@ -81,6 +92,16 @@ def main(argv: list[str] | None = None) -> int:
         action="append",
         default=[],
         help="Only reclassify objects currently having this citation category; repeat or use commas",
+    )
+    reclassify_parser.add_argument(
+        "--source", choices=sorted(CITATION_SOURCES),
+        help="Only reclassify objects whose current citation categories all have this source",
+    )
+    reclassify_parser.add_argument(
+        "--job-id", help="Only reclassify objects whose current citation categories are assigned to this job",
+    )
+    reclassify_parser.add_argument(
+        "--citation-only", action="store_true", help="Leave person roles and gender facets unchanged",
     )
     reclassify_parser.add_argument("--quiet", action="store_true", help="Hide progress output")
 
@@ -135,11 +156,18 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "ingest":
         if args.source == "wgsbn" and args.mode != "add":
             ingest_parser.error("--source wgsbn requires --mode add")
+        if args.sync_mpc_names and args.mode != "add":
+            ingest_parser.error("--sync-mpc-names requires --mode add")
+        if any(not (n.isascii() and n.isdecimal() and not n.startswith("0")) for n in args.sync_mpc_names):
+            ingest_parser.error("--sync-mpc-names requires positive permanent numbers without leading zeros")
+        if not math.isfinite(args.timeout) or args.timeout <= 0:
+            ingest_parser.error("--timeout must be a finite positive number")
         result = ingest(
             Path(args.db),
             limit=args.limit,
             mode=args.mode,
             source=args.source,
+            sync_mpc_names=tuple(args.sync_mpc_names),
             delay=args.delay,
             batch_size=args.batch_size,
             pause_every=args.pause_every,
@@ -150,6 +178,8 @@ def main(argv: list[str] | None = None) -> int:
             classifier_mode=args.classifier,
             ollama_model=args.ollama_model,
             ollama_host=args.ollama_host,
+            ollama_timeout=args.timeout,
+            ollama_think_on_review=args.think_on_review,
             progress=ProgressReporter(enabled=not args.quiet),
         )
         print(
@@ -163,26 +193,46 @@ def main(argv: list[str] | None = None) -> int:
             f"({result['wgsbn_bulletins_fetched']} Bulletins / "
             f"{result['wgsbn_namings_fetched']} namings fetched)."
         )
+        if result["mpc_name_differences"] or args.sync_mpc_names:
+            print(
+                f"MPC name differences: {result['mpc_name_differences']}; "
+                f"synced names only: {result['mpc_names_synced']}."
+            )
+        if result["mpc_name_differences"]:
+            print("To apply only the names you choose, replace NUMBER1 NUMBER2 with one or more numbers from the warnings:")
+            print("  python -m mpnames ingest --mode add --limit 0 --sync-mpc-names NUMBER1 NUMBER2")
+            if args.db != str(db.DEFAULT_DB):
+                print("Use the same --db option to target this database.")
         return 0
 
     if args.command == "reclassify":
-        result = reclassify_existing(
-            Path(args.db),
-            classifier_mode=args.classifier,
-            ollama_model=args.ollama_model,
-            ollama_host=args.ollama_host,
-            ollama_timeout=args.timeout,
-            ollama_think=args.think,
-            ollama_think_on_review=args.think_on_review,
-            limit=args.limit,
-            categories=args.category,
-            progress=ProgressReporter(enabled=not args.quiet),
-        )
+        try:
+            result = reclassify_existing(
+                Path(args.db),
+                classifier_mode=args.classifier,
+                ollama_model=args.ollama_model,
+                ollama_host=args.ollama_host,
+                ollama_timeout=args.timeout,
+                ollama_think=args.think,
+                ollama_think_on_review=args.think_on_review,
+                limit=args.limit,
+                categories=args.category,
+                source=args.source,
+                job_id=args.job_id,
+                citation_only=args.citation_only,
+                progress=ProgressReporter(enabled=not args.quiet),
+            )
+        except ValueError as exc:
+            reclassify_parser.error(str(exc))
         filter_text = (
             f" in categories {', '.join(result['category_filter'])}"
             if result.get("category_filter")
             else ""
         )
+        if args.source:
+            filter_text += f" with existing source {args.source}"
+        if args.job_id:
+            filter_text += f" from job {args.job_id}"
         print(
             f"Reclassified {result['records']} records{filter_text} using {result['classifier']}; "
             f"job={result['job_id']}."

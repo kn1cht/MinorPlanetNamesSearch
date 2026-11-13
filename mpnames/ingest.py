@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import datetime
 import json
+import math
 import time
 import urllib.error
 import urllib.request
@@ -50,6 +51,7 @@ from .wgsbn import (
 
 INGEST_MODES = {"add", "update", "repair"}
 INGEST_SOURCES = {"mpc", "wgsbn"}
+CITATION_SOURCES = {"rule", "ollama"}
 
 
 def ingest(
@@ -68,9 +70,12 @@ def ingest(
     orbit_pause_seconds: float = ORBIT_LONG_PAUSE_SECONDS,
     mode: str = "add",
     source: str = "mpc",
+    sync_mpc_names: tuple[str, ...] = (),
     classifier_mode: str = "rules",
     ollama_model: str | None = None,
     ollama_host: str = OLLAMA_HOST,
+    ollama_timeout: float = 60.0,
+    ollama_think_on_review: bool = True,
     wgsbn_sync: bool = True,
     progress: ProgressReporter = QUIET_PROGRESS,
 ) -> dict[str, Any]:
@@ -80,8 +85,14 @@ def ingest(
         raise ValueError(f"Unknown ingest source: {source}")
     if source == "wgsbn" and mode != "add":
         raise ValueError("The WGSBN source supports only add mode")
+    if sync_mpc_names and mode != "add":
+        raise ValueError("MPC name reconciliation requires add mode")
     if limit is not None and limit < 0:
         raise ValueError("limit must be greater than or equal to zero")
+    if not math.isfinite(ollama_timeout) or ollama_timeout <= 0:
+        raise ValueError("Ollama timeout must be a finite positive number")
+    sync_permids = frozenset(sync_mpc_names)
+    mpc_names_only = source == "mpc" and bool(sync_permids) and limit == 0
 
     connection = db.connect(db_path)
     db.initialize(connection)
@@ -101,6 +112,13 @@ def ingest(
         progress.message(f"Fetching named-object list from {mpnames_url}")
         names = fetch_names(mpnames_url)
     progress.message(f"Named-object list contains {len(names)} records")
+
+    mpc_names = names if source == "mpc" else []
+    if source == "wgsbn" and sync_permids:
+        progress.message(f"Fetching MPC name list for reconciliation from {mpnames_url}")
+        mpc_names = fetch_names(mpnames_url)
+    name_differences = _mpc_name_differences(connection, mpc_names, progress=progress)
+
     selected_names = _select_names_for_mode(connection, names, mode=mode, limit=limit)
     progress.message(f"Ingest mode={mode}; selected {len(selected_names)} records for detail fetch")
     def fetch_details(label: str, fetch: Callable[[], dict]) -> dict:
@@ -135,8 +153,13 @@ def ingest(
             for identifier in identifiers.values()
             if identifier.get("permid")
         }
-    classifier = CitationClassifier(mode=classifier_mode, model=ollama_model, host=ollama_host)
-    facet_classifier = PersonFacetClassifier(mode=classifier_mode, model=ollama_model, host=ollama_host)
+    classifier = CitationClassifier(
+        mode=classifier_mode, model=ollama_model, host=ollama_host,
+        timeout=ollama_timeout, think_on_review=ollama_think_on_review,
+    )
+    facet_classifier = PersonFacetClassifier(
+        mode=classifier_mode, model=ollama_model, host=ollama_host, timeout=ollama_timeout,
+    )
     job: dict[str, Any] | None = None
     orbits: dict[str, OrbitRecord] = {}
     stats = {
@@ -149,6 +172,8 @@ def ingest(
         "inserted": 0,
         "updated": 0,
         "unchanged": 0,
+        "mpc_name_differences": len(name_differences),
+        "mpc_names_synced": 0,
         "wgsbn_bulletins_fetched": 0,
         "wgsbn_namings_fetched": 0,
         "naming_metadata_updated": 0,
@@ -161,7 +186,8 @@ def ingest(
         if job is None:
             job = new_classification_job(
                 command="ingest", classifier_mode=classifier_mode, ollama_model=ollama_model,
-                ollama_host=ollama_host, ollama_timeout=60.0, ollama_think=False,
+                ollama_host=ollama_host, ollama_timeout=ollama_timeout, ollama_think=False,
+                ollama_think_on_review=ollama_think_on_review,
                 include_categories=True, include_person_facets=True,
             )
             db.create_classification_job(connection, job)
@@ -247,19 +273,35 @@ def ingest(
     if job is not None:
         db.finish_classification_job(connection, job["job_id"], "completed")
 
+    names_to_sync = [record for record in name_differences if record.permid in sync_permids]
+    if names_to_sync:
+        cursor = connection.executemany(
+            """
+            UPDATE minor_planets
+            SET name_ascii = ?, name_display = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE permid = ? AND (name_ascii <> ? OR name_display <> ?)
+            """,
+            [
+                (record.name_ascii, record.name_display, record.permid, record.name_ascii, record.name_display)
+                for record in names_to_sync
+            ],
+        )
+        stats["mpc_names_synced"] = cursor.rowcount
+
     # Keep the MPC ingest durable even if a later WGSBN request fails. A
     # subsequent ``ingest --mode repair`` retries the WGSBN synchronization.
     connection.commit()
 
     try:
-        if wgsbn_sync and source == "mpc":
+        if wgsbn_sync and source == "mpc" and not mpc_names_only:
             wgsbn_result = _collect_new_wgsbn_bulletins(connection, progress=progress)
         stats["wgsbn_bulletins_fetched"] = wgsbn_result["fetched_bulletins"]
         stats["wgsbn_namings_fetched"] = wgsbn_result["fetched_namings"]
-        naming_metadata = db.sync_wgsbn_naming_metadata(connection)
-        stats["naming_metadata_updated"] = naming_metadata["updated"]
-        stats["naming_metadata_unchanged"] = naming_metadata["unchanged"]
-        stats["naming_metadata_missing"] = naming_metadata["missing"]
+        if not mpc_names_only:
+            naming_metadata = db.sync_wgsbn_naming_metadata(connection)
+            stats["naming_metadata_updated"] = naming_metadata["updated"]
+            stats["naming_metadata_unchanged"] = naming_metadata["unchanged"]
+            stats["naming_metadata_missing"] = naming_metadata["missing"]
         db.refresh_dataset_stats(connection)
         connection.commit()
     finally:
@@ -329,36 +371,39 @@ def reclassify_existing(
     ollama_think_on_review: bool = True,
     limit: int | None = None,
     categories: list[str] | None = None,
+    source: str | None = None,
+    job_id: str | None = None,
+    citation_only: bool = False,
     progress: ProgressReporter = QUIET_PROGRESS,
 ) -> dict[str, Any]:
+    if source is not None and source not in CITATION_SOURCES:
+        raise ValueError(f"Unknown citation source: {source}")
     connection = db.connect(db_path)
     db.initialize(connection)
+    if job_id is not None and connection.execute(
+        "SELECT 1 FROM classification_jobs WHERE job_id = ?", (job_id,)
+    ).fetchone() is None:
+        connection.close()
+        raise ValueError(f"Unknown classification job: {job_id}")
+
+    category_filter = _normalize_category_filters(categories or [])
+    rows = _reclassification_candidates(
+        connection, categories=category_filter, source=source, job_id=job_id, limit=limit,
+    )
     classifier = CitationClassifier(
         mode=classifier_mode, model=ollama_model, host=ollama_host,
         timeout=ollama_timeout, think=ollama_think, think_on_review=ollama_think_on_review,
     )
-    facet_classifier = PersonFacetClassifier(
+    facet_classifier = None if citation_only else PersonFacetClassifier(
         mode=classifier_mode, model=ollama_model, host=ollama_host,
         timeout=ollama_timeout, think=ollama_think,
     )
     job = new_classification_job(
         command="reclassify", classifier_mode=classifier_mode, ollama_model=ollama_model,
         ollama_host=ollama_host, ollama_timeout=ollama_timeout, ollama_think=ollama_think,
-        ollama_think_on_review=ollama_think_on_review, include_categories=True, include_person_facets=True,
+        ollama_think_on_review=ollama_think_on_review, include_categories=True, include_person_facets=not citation_only,
     )
     db.create_classification_job(connection, job)
-    category_filter = _normalize_category_filters(categories or [])
-    sql = "SELECT DISTINCT mp.permid, mp.citation_text, mp.name_ascii FROM minor_planets mp"
-    params: list[Any] = []
-    if category_filter:
-        sql += " JOIN categories c_filter ON c_filter.permid = mp.permid AND c_filter.kind = 'citation'"
-        sql += f" WHERE c_filter.value IN ({', '.join('?' for _ in category_filter)})"
-        params.extend(category_filter)
-    sql += " ORDER BY CAST(mp.permid AS INTEGER)"
-    if limit is not None:
-        sql += " LIMIT ?"
-        params.append(limit)
-    rows = connection.execute(sql, params).fetchall()
 
     updated = 0
     changed = 0
@@ -366,6 +411,10 @@ def reclassify_existing(
     log_fp = None
 
     filter_detail = f" categories={','.join(category_filter)}" if category_filter else ""
+    if source is not None:
+        filter_detail += f" source={source}"
+    if job_id is not None:
+        filter_detail += f" job={job_id}"
     progress.message(f"Reclassifying {len(rows)} existing records with classifier={classifier_mode}{filter_detail}")
     try:
         for index, row in enumerate(rows, start=1):
@@ -386,10 +435,11 @@ def reclassify_existing(
                 changed += 1
 
             db.replace_citation_categories(connection, row["permid"], citation_categories)
-            facets = facet_classifier.classify(row["citation_text"], [category.value for category in citation_categories])
-            db.replace_citation_facets(connection, row["permid"], facets)
             db.assign_classification_job(connection, row["permid"], "citation_category", job["job_id"])
-            db.assign_classification_job(connection, row["permid"], "person_facet", job["job_id"])
+            if facet_classifier is not None:
+                facets = facet_classifier.classify(row["citation_text"], [category.value for category in citation_categories])
+                db.replace_citation_facets(connection, row["permid"], facets)
+                db.assign_classification_job(connection, row["permid"], "person_facet", job["job_id"])
             updated += 1
             if index % 100 == 0:
                 connection.commit()
@@ -409,6 +459,40 @@ def reclassify_existing(
         connection.close()
     progress.message(f"Reclassification complete ({changed} changes out of {updated} processed)")
     return {"records": updated, "changed": changed, "classifier": classifier_mode, "category_filter": category_filter, "log_file": str(log_file) if log_fp else None, "job_id": job["job_id"]}
+
+
+def _reclassification_candidates(
+    connection: Any, *, categories: list[str], source: str | None, job_id: str | None, limit: int | None,
+) -> list:
+    sql = "SELECT mp.permid, mp.citation_text, mp.name_ascii FROM minor_planets mp"
+    conditions = []
+    params: list[Any] = []
+    if categories or source is not None:
+        category_query = "SELECT 1 FROM categories c WHERE c.permid = mp.permid AND c.kind = 'citation'"
+        matching_query = category_query
+        if categories:
+            matching_query += f" AND c.value IN ({', '.join('?' for _ in categories)})"
+            params.extend(categories)
+        if source is not None:
+            matching_query += " AND c.source = ?"
+            params.append(source)
+        conditions.append(f"EXISTS ({matching_query})")
+        if source is not None:
+            conditions.append(f"NOT EXISTS ({category_query} AND c.source <> ?)")
+            params.append(source)
+    if job_id is not None:
+        conditions.append(
+            "EXISTS (SELECT 1 FROM classification_assignments a WHERE a.permid = mp.permid "
+            "AND a.target = 'citation_category' AND a.job_id = ?)"
+        )
+        params.append(job_id)
+    if conditions:
+        sql += " WHERE " + " AND ".join(conditions)
+    sql += " ORDER BY CAST(mp.permid AS INTEGER)"
+    if limit is not None:
+        sql += " LIMIT ?"
+        params.append(limit)
+    return connection.execute(sql, params).fetchall()
 
 
 def classify_person_facets_existing(
@@ -685,6 +769,31 @@ def _normalize_category_filters(values: list[str]) -> list[str]:
 
 def fetch_names(url: str = MPNAMES_URL) -> list[NameRecord]:
     return parse_mpnames_html(_read_text_url(url))
+
+
+def _mpc_name_differences(
+    connection: Any, mpc_names: list[NameRecord], *, progress: ProgressReporter
+) -> list[NameRecord]:
+    if not mpc_names:
+        return []
+    stored = {
+        row["permid"]: (row["name_ascii"], row["name_display"])
+        for row in connection.execute("SELECT permid, name_ascii, name_display FROM minor_planets")
+    }
+    differences = []
+    for record in {record.permid: record for record in mpc_names}.values():
+        previous = stored.get(record.permid)
+        if previous is None or previous == (record.name_ascii, record.name_display):
+            continue
+        old_ascii, old_display = previous
+        changes = []
+        if old_display != record.name_display:
+            changes.append(f"display {old_display!r} -> {record.name_display!r}")
+        if old_ascii != record.name_ascii:
+            changes.append(f"search {old_ascii!r} -> {record.name_ascii!r}")
+        progress.message(f"Warning: MPC name differs for ({record.permid}): {', '.join(changes)}")
+        differences.append(record)
+    return differences
 
 
 def fetch_discoveries(

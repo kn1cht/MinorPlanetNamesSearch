@@ -40,6 +40,7 @@ SPECIAL_MAP = {
     r"\l": "ł",
     r"{\ss}": "ß",
     r"\ss": "ß",
+    r"{\textquoteright}": "’",
     r"{\i}": "i",  # Map dotless i to regular i for Unicode combining character resolution
     r"\i": "i",
 }

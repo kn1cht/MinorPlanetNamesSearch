@@ -1,3 +1,5 @@
+from contextlib import redirect_stderr, redirect_stdout
+from io import StringIO
 from pathlib import Path
 import tempfile
 import unittest
@@ -5,11 +7,13 @@ from urllib.error import URLError
 from unittest.mock import Mock, patch
 
 from mpnames import db
+from mpnames.__main__ import main
 from mpnames.categories import Category
 from mpnames.ingest import _unique_orbit_count, ingest, reclassify_existing
 from mpnames.mpcorb import OrbitRecord
 from mpnames.mpnames_parser import NameRecord
 from mpnames.numbered_mps import DiscoveryRecord
+from mpnames.progress import ProgressReporter
 from mpnames.wgsbn import WgsbnNaming
 
 
@@ -69,6 +73,74 @@ class IngestModeTests(unittest.TestCase):
         self.assertEqual(result["selected_records"], 0)
         fetch_identifiers.assert_not_called()
         fetch_orbits.assert_not_called()
+
+    def test_mpc_name_sync_warns_then_updates_names_and_search_only(self):
+        self._upsert("1", identifier=_identifier("1", "Name1", "An existing citation."))
+        self._mark_complete("1")
+        self._upsert("3")  # Absent from the MPC list; leave it alone.
+        self._upsert("4")
+        self._upsert("5")
+        mpc_names = [
+            NameRecord("1", "Newname", "Néwname"),
+            NameRecord("4", "Suran", "Suran"),
+            NameRecord("5", "Othername", "Othername"),
+            *_records("2"),
+        ]
+        details = Mock(side_effect=AssertionError("Name sync does not fetch object details"))
+        output = StringIO()
+        with patch.multiple(
+            "mpnames.ingest", fetch_names=Mock(return_value=mpc_names), fetch_identifiers=details,
+            fetch_orbits=details, fetch_discoveries=details, _collect_new_wgsbn_bulletins=details,
+        ):
+            warn = ingest(self.db_path, limit=0, wgsbn_sync=False, progress=ProgressReporter(stream=output))
+            connection = db.connect(self.db_path)
+            before = dict(connection.execute("SELECT * FROM minor_planets WHERE permid = '1'").fetchone())
+            categories = self._citation_categories("1")
+            self.assertEqual(before["name_display"], "Name1")
+            self.assertEqual(db.search(connection, q="Name1", q_target="name")["total"], 1)
+            self.assertEqual(warn["mpc_name_differences"], 3)
+            self.assertEqual(warn["mpc_names_synced"], 0)
+            self.assertIn("Warning: MPC name differs for (1): display 'Name1' -> 'Néwname'", output.getvalue())
+
+            synced = ingest(self.db_path, limit=0, sync_mpc_names=("1", "5"))
+            repeat = ingest(self.db_path, limit=0, sync_mpc_names=("1", "5"))
+            after = dict(connection.execute("SELECT * FROM minor_planets WHERE permid = '1'").fetchone())
+            self.assertEqual(db.search(connection, q="Newname", q_target="name")["total"], 1)
+            self.assertEqual(db.search(connection, q="Name1", q_target="name")["total"], 0)
+            self.assertEqual(db.get_object(connection, "4")["name_display"], "Name4")
+            self.assertEqual(db.get_object(connection, "5")["name_display"], "Othername")
+            connection.close()
+
+        self.assertEqual((synced["mpc_name_differences"], synced["mpc_names_synced"]), (3, 2))
+        self.assertEqual((repeat["mpc_name_differences"], repeat["mpc_names_synced"]), (1, 0))
+        self.assertEqual((after["name_ascii"], after["name_display"]), ("Newname", "Néwname"))
+        fields = before.keys() - {"name_ascii", "name_display", "updated_at"}
+        self.assertEqual({k: before[k] for k in fields}, {k: after[k] for k in fields})
+        self.assertEqual(self._citation_categories("1"), categories)
+        self.assertEqual(self._permids(), ["1", "3", "4", "5"])
+
+    def test_ingest_cli_guides_selective_sync_and_rejects_bare_option(self):
+        self._upsert("1")
+        args = ["ingest", "--db", str(self.db_path), "--limit", "0", "--quiet"]
+        mpc = Mock(return_value=[NameRecord("1", "Newname", "Newname")])
+        with patch.multiple(
+            "mpnames.ingest", fetch_names=mpc,
+            _collect_new_wgsbn_bulletins=Mock(return_value={"fetched_bulletins": 0, "fetched_namings": 0}),
+        ):
+            with redirect_stdout(StringIO()) as output:
+                self.assertEqual(main(args), 0)
+            self.assertIn("--sync-mpc-names NUMBER1 NUMBER2", output.getvalue())
+            with redirect_stderr(StringIO()), self.assertRaises(SystemExit):
+                main([*args, "--sync-mpc-names"])
+            mpc.assert_called_once()
+
+    def test_wgsbn_ingest_can_opt_in_to_mpc_name_sync(self):
+        self._upsert("1")
+        with patch("mpnames.ingest.fetch_names", return_value=[NameRecord("1", "Newname", "Newname")]) as fetch:
+            synced = ingest(self.db_path, source="wgsbn", sync_mpc_names=("1",), wgsbn_sync=False)
+        fetch.assert_called_once()
+        self.assertEqual(synced["selected_records"], 0)
+        self.assertEqual(synced["mpc_names_synced"], 1)
 
     def test_update_mode_fetches_existing_but_skips_unchanged_write(self):
         self._upsert("1")
@@ -231,6 +303,8 @@ class IngestModeTests(unittest.TestCase):
         identifiers = {record.name_ascii: _identifier(record.permid, record.name_ascii) for record in records}
         events: list[tuple[str, str | None]] = []
         classifier = Mock()
+        citation_factory = Mock(return_value=classifier)
+        facet_factory = Mock(return_value=Mock(classify=Mock(return_value=[])))
 
         def fake_classify(citation_text):
             events.append(("classify", citation_text))
@@ -250,9 +324,13 @@ class IngestModeTests(unittest.TestCase):
             fetch_identifiers=Mock(return_value=identifiers),
             fetch_orbits=Mock(side_effect=fake_fetch_orbits),
             fetch_discoveries=Mock(return_value={}),
-            CitationClassifier=Mock(return_value=classifier),
+            CitationClassifier=citation_factory,
+            PersonFacetClassifier=facet_factory,
         ):
-            result = ingest(self.db_path, mode="add", limit=2, classifier_mode="ollama", wgsbn_sync=False)
+            result = ingest(
+                self.db_path, mode="add", limit=2, classifier_mode="ollama", wgsbn_sync=False,
+                ollama_timeout=120, ollama_think_on_review=False,
+            )
 
         self.assertEqual(events[0], ("before_pause", None))
         self.assertEqual(events[1][0], "classify")
@@ -260,6 +338,13 @@ class IngestModeTests(unittest.TestCase):
         self.assertEqual(events[2], ("after_pause", None))
         self.assertEqual(classifier.classify.call_count, 2)
         self.assertEqual(result["inserted"], 2)
+        self.assertEqual(citation_factory.call_args.kwargs["timeout"], 120)
+        self.assertFalse(citation_factory.call_args.kwargs["think_on_review"])
+        self.assertEqual(facet_factory.call_args.kwargs["timeout"], 120)
+        connection = db.connect(self.db_path)
+        job = connection.execute("SELECT ollama_timeout, ollama_think_on_review FROM classification_jobs").fetchone()
+        connection.close()
+        self.assertEqual(tuple(job), (120, 0))
 
     def test_unique_orbit_count_ignores_lookup_aliases(self):
         orbit = OrbitRecord(
@@ -326,6 +411,44 @@ class IngestModeTests(unittest.TestCase):
             ("citation_category", result["job_id"]),
             ("person_facet", result["job_id"]),
         ])
+
+    def test_reclassify_source_and_job_select_only_rule_categories_in_that_job(self):
+        for permid in ("1", "2", "3"):
+            self._upsert(permid)
+        batch = reclassify_existing(self.db_path, classifier_mode="rules")
+        self._upsert("4")  # Rule result outside the batch.
+        connection = db.connect(self.db_path)
+        ollama = Category("citation", "Person", "ollama", 0.85)
+        db.replace_citation_categories(connection, "2", [ollama])
+        db.replace_citation_categories(connection, "3", [ollama, Category("citation", "Place")])
+        facets_before = db.get_object(connection, "1")["citation_facets"]
+        connection.commit()
+        connection.close()
+
+        classifier = Mock()
+        classifier.classify.return_value = [ollama]
+        with patch("mpnames.ingest.CitationClassifier", return_value=classifier), patch(
+            "mpnames.ingest.PersonFacetClassifier", side_effect=AssertionError("citation-only must skip facets"),
+        ), redirect_stdout(StringIO()) as output:
+            self.assertEqual(main([
+                "reclassify", "--db", str(self.db_path), "--classifier", "rules", "--source", "rule",
+                "--job-id", batch["job_id"], "--citation-only", "--quiet",
+            ]), 0)
+
+        classifier.classify.assert_called_once()
+        self.assertIn("Reclassified 1 records", output.getvalue())
+        connection = db.connect(self.db_path)
+        self.assertEqual(db.get_object(connection, "1")["citation_facets"], facets_before)
+        assignments = {
+            (row["permid"], row["target"]): row["job_id"]
+            for row in connection.execute("SELECT permid, target, job_id FROM classification_assignments")
+        }
+        connection.close()
+        self.assertNotEqual(assignments["1", "citation_category"], batch["job_id"])
+        self.assertEqual(assignments["1", "person_facet"], batch["job_id"])
+        self.assertEqual(assignments["2", "citation_category"], batch["job_id"])
+        self.assertEqual(assignments["3", "citation_category"], batch["job_id"])
+        self.assertNotIn(("4", "citation_category"), assignments)
 
     def test_reclassify_filter_accepts_no_citation_alias(self):
         result = reclassify_existing(
